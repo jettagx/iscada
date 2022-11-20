@@ -254,11 +254,7 @@ function handleDevices(devices)
   }
 }
 
-//button控件的创建
-function handleButton(button)
-{
-  console.log("new button:" + button["name"] + " x: " + button["x"] + " y: " + button["y"]);
-}
+
 
 //button控件的创建
 function handleButtons(buttons)
@@ -269,11 +265,7 @@ function handleButtons(buttons)
   }
 }
 
-//label控件的创建
-function handleLabel(label)
-{
-  console.log("new label:" + label["name"] + " x: " + label["x"] + " y: " + label["y"]);
-}
+
 
 function handleLabels(labels)
 {

@@ -15,8 +15,9 @@ const createWindow = () => {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  ipcMain.handle('ping', () => 'pong')
+  //ipcMain.handle('ping', () => 'pong')
   win.loadFile('index.html');
+  win.webContents.openDevTools();
 };
 
 app.whenReady().then(() => {
@@ -34,3 +35,6 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+
+
