@@ -226,3 +226,71 @@ function parseArray(parsedArray)
 
 let result = jsonParse(prjFile);
 console.log(result);
+
+let myMap = new Map();
+myMap.set("device",handleDevices);
+myMap.set("button",handleButtons);
+myMap.set("label", handleLabels);
+
+//设备处理函数
+let myDevice = new Map();
+myDevice.set("tcp508neth", handleTcp508neth);
+
+//处理Tcp508neth设备
+function handleTcp508neth(device)
+{
+  console.log("new dev:" + device["name"] + " id is " + device["id"]);
+}
+
+function handleDevices(devices)
+{
+  for (let key in devices)
+  {
+    let device_func;
+    if (device_func = myDevice.get(devices[key]["name"]))//不同的设备名采用不同处理函数
+    {
+      device_func(devices[key]);
+    }
+  }
+}
+
+//button控件的创建
+function handleButton(button)
+{
+  console.log("new button:" + button["name"] + " x: " + button["x"] + " y: " + button["y"]);
+}
+
+//button控件的创建
+function handleButtons(buttons)
+{
+  for (let key in buttons)
+  {
+    handleButton(buttons[key]);
+  }
+}
+
+//label控件的创建
+function handleLabel(label)
+{
+  console.log("new label:" + label["name"] + " x: " + label["x"] + " y: " + label["y"]);
+}
+
+function handleLabels(labels)
+{
+  for (let key in labels)
+  {
+    handleLabel(labels[key]);
+  }
+}
+
+//根据解析得到的js对象初始化设备和构建界面
+for (let key in result) {
+  let handle;
+
+  if (handle = myMap.get(key))
+  {
+    //根据key的不同采用不同的处理函数。
+    handle(result[key]);
+  }
+ }
+ 
