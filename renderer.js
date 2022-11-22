@@ -73,6 +73,12 @@ function whoClick(canvas)
     if (clickedThing)
     {
       console.log(clickedThing.name + " clicked");
+
+      //调用设备通信函数，进行通信
+      devCommu(clickedThing, (data)=>{
+        console.log("browser server data:");
+        console.log(data);
+      });
     }
   });
 }
