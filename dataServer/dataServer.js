@@ -93,7 +93,7 @@ let client_modbus;
 
 let variable;
 
-function connectTcp508neth(client)
+function connectTcp508neth()
 {
   //用nodejs API创建tcp客户端
   //假设服务器为
