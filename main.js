@@ -11,6 +11,7 @@ require('electron-reload')(__dirname, {
 });
 
 let win;
+let winIsclosed = false;
 const createWindow = () => {
   win = new BrowserWindow({
     width: 800,
@@ -18,6 +19,10 @@ const createWindow = () => {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
+  });
+
+  win.on('close', function() {
+    winIsclosed = true;
   });
 
   ipcMain.handle('startCommu', (event, dev) => {startCommu(dev)});
@@ -85,8 +90,13 @@ function devCommu(dev, info)
       socketClient.on('data', (data) => {
         console.log("recv server data:");
         console.log(data.toString());
-        //cb(data.toString());//调用回调函数，让浏览器处理数据
-        win.webContents.send('dataFromServer', data.toString());
+
+        //bugfix当退出时，浏览器端被析构，导致主进程报错
+        //修复方法，判断浏览器端是否存在
+        if (winIsclosed == false)
+        {
+          win.webContents.send('dataFromServer', data.toString());
+        }
       });
 
       clinetInit = true;
