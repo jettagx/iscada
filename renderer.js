@@ -13,14 +13,20 @@ var c=document.getElementById("myCanvas");
 var ctx=c.getContext("2d");
 
 let clickThings = [];
+let showFunctions = [];
+let showParam = [];
+
 
 //button控件的创建
 function handleButton(button)
 {
   //console.log("new button:" + button["name"] + " x: " + button["x"] + " y: " + button["y"]);
   //画图,按钮默认为150*100
-  ctx.fillStyle = "blue";
-  ctx.fillRect(button["x"],button["y"],BUTTON_WIDTH,BUTTON_HEIGHT);
+  showFunctions.push(showButton);
+  showParam.push(button);
+
+  showButton(button);
+  
 
   //记录当前按钮
   button.width = BUTTON_WIDTH;
@@ -28,11 +34,45 @@ function handleButton(button)
   clickThings.push(button);
 }
 
+function showButton(button)
+{
+  ctx.fillStyle = "blue";
+  ctx.fillRect(button["x"],button["y"],BUTTON_WIDTH,BUTTON_HEIGHT);
+}
+
+//初始显示为"#",后面根据值来显示
+function showLabel(label)
+{
+  ctx.fillText(label.value ? label.value :"#",label["x"],label["y"]);
+}
+
+//更新标签，目前只支持更新标签
+function updateGui()
+{
+  //清屏，然后按照showFunctions顺序依次画图
+
+  ctx.clearRect(0,0,800,600);
+  let index = 0;
+
+  while(index < showFunctions.length)
+  {
+    let showf = showFunctions[index];
+    let showp = showParam[index];
+    index++;
+
+    showf(showp);
+  }
+}
+
 //label控件的创建
 function handleLabel(label)
 {
   //console.log("new label:" + label["name"] + " x: " + label["x"] + " y: " + label["y"]);
-  ctx.fillText("#",label["x"],label["y"]);
+  showFunctions.push(showLabel);
+  showParam.push(label);
+
+  showLabel(label);
+  showThings.push(label);
 }
 
 function findClickedThing(mouse)
@@ -75,9 +115,17 @@ function whoClick(canvas)
       console.log(clickedThing.name + " clicked");
 
       //调用设备通信函数，进行通信
-      devCommu(clickedThing, (data)=>{
-        console.log("browser server data:");
-        console.log(data);
+      devWriteCommu(clickedThing, (data)=>{
+        //console.log("browser server data:");
+        //console.log(data);
+        let tmp;
+        if (tmp = jsonParse(data))
+        {
+            if(tmp.result == "ok")
+            {
+                console.log(clickedThing.name + "成功");
+            }
+        }
       });
     }
   });

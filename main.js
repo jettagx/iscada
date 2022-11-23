@@ -91,7 +91,7 @@ function devCommu(dev, info)
 
       clinetInit = true;
     }
-    
+    info.dev_name = dev.name;//将设备名附加到请求中
     socketClient.write(Obj2json_.Obj2json(info));//向服务器发送请求
   }
 }

@@ -34,11 +34,11 @@ function eatByte()
   }
 }
 
-function jsonParse(prjFile_)
+module.exports.jsonParse = function jsonParse(prjFile_)
 {
+  prjFile = prjFile_;
   curIndex = 0;
   parsedObj = {};
-  prjFile = prjFile_;
 
   try {
     jmpBlank();//跳过开头可能有的空字符
@@ -214,6 +214,3 @@ function parseArray(parsedArray)
 
   throw 'undefined array type';
 }
-
-
- 
