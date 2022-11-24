@@ -6,15 +6,16 @@ const jsonParse_ = require('./json_parse');
 let fake_dev = {};
 fake_dev.value = 0;
 
-let client;
-
-
 const IDLE = 0;
 const BUSY = 1;
-let devCommuState = IDLE;
-let devCommu = [];
-let devCommuData = [];
 
+let devsManage = [];
+let devClientMap = new Map();
+
+// let devCommuState = IDLE;
+// let devCommu = [];
+// let devCommuData = [];
+// let client;
 
 // 创建TCP服务器
 const server = net.createServer(function (client_) {
@@ -23,22 +24,36 @@ const server = net.createServer(function (client_) {
     //client = client_;//不能直接赋值
 
     // 接收客户端的数据
-    client_.on('data', function (data) {
+    client_.on('data', function (req) {
         //console.log('server recv client data:', data.toString('utf-8'));
         
         //不能直接处理，而要判断当前是否忙
-        //将客户端入数组
-        devCommu.push(client_);
-        devCommuData.push(data);
+        //根据dev_id来判断数据该发给谁处理
+        let req_js = jsonParse_.jsonParse(req.toString('utf-8'));
 
-        if (devCommuState == IDLE)
+        let dev_id = req_js.device_id[0];
+
+        let dev = devsManage[dev_id];
+
+        if (dev == undefined)
         {
-            devCommuState = BUSY;
+            devsManage[dev_id] = newDev();
 
-            client = devCommu.shift();//从数组取出连接
-            devCommuData.shift();
+            dev = devsManage[dev_id];
+        }
 
-            handleClient(data.toString('utf-8'));
+        //将客户端入数组
+        dev.devCommu.push(client_);
+        dev.devCommuData.push(req);
+
+        if (dev.devCommuState == IDLE)
+        {
+            dev.devCommuState = BUSY;
+
+            dev.client = dev.devCommu.shift();//从数组取出连接
+            dev.devCommuData.shift();
+
+            handleClient(req.toString('utf-8'));
         }
     });
 
@@ -109,27 +124,24 @@ function handleClient(req)
     handleTcp508neth(req);
 }
 
-let initTcp508neth = false;
-let client_modbus;
-
-let variable;
-
-function changeClient()
+function changeClient(dev)
 {
     //如果有挂起的，解挂处理，标志位保持BUSY
     //如果没有挂起的，标志位置为IDLE
-    if (devCommu.length)
+    if (dev.devCommu.length)
     {
-        client = devCommu.shift();//如果有挂起的解挂，并处理
-        let data = devCommuData.shift();
+        dev.client = dev.devCommu.shift();//如果有挂起的解挂，并处理
+        let data = dev.devCommuData.shift();
 
         handleClient(data.toString('utf-8'));
     }
     else
     {
-        devCommuState = IDLE;
+        dev.devCommuState = IDLE;
     }
 }
+
+
 
 function connectTcp508neth()
 {
@@ -146,6 +158,13 @@ function connectTcp508neth()
   socketClient.on('data', (data) => {
     //console.log('recv data from tcp508n');
     //收到tcp508n的返回数据
+
+    //根据当前连接找到对应的设备id号
+    let dev_id = devClientMap.get(socketClient);
+
+    //根据id号找到variable的值
+    let dev = devsManage[dev_id];
+    let variable = dev.variable;
     
     if (data[7] == 0x01)
     {
@@ -153,50 +172,79 @@ function connectTcp508neth()
         //console.log('recv data from tcp508n: ', data);
         let tmp = (data[9] & (1 << variable)) >> variable;
         let replyRead = '{"result":"' + tmp + '"}';
-        client.write(replyRead);
+        dev.client.write(replyRead);
     }
     else if(data[7] == 0x05)
     {
         //如果是按钮，返回操作成功响应数据
         let replyWrite = '{"result":"ok"}';
-        client.write(replyWrite);//返回数据给浏览器端
+        dev.client.write(replyWrite);//返回数据给浏览器端
     }
 
-    changeClient();
+    changeClient(dev);
 });
 
   return socketClient;
 }
 
+
+
+function newDev()
+{
+    //let initTcp508neth = false;
+    let variable;
+
+    let dev = {};
+    
+
+    dev.init = false;
+    dev.client_modbus = null;
+    dev.variable = variable;
+
+    dev.devCommuState = IDLE;
+    dev.devCommu = [];
+    dev.devCommuData = [];
+    dev.client;
+
+    return dev;
+}
+
 function handleTcp508neth(req)
 {
     //如果是第一次收到通信要求，首先创建到服务器的连接
-    if (initTcp508neth == false)
-    {
-        initTcp508neth = true;
-        client_modbus = connectTcp508neth();
-    }
-    
-
-    //如果是按钮，则看看variable字段中值是多少并发送相应报文
     //从字符串构建js对象
     let req_js = jsonParse_.jsonParse(req);
 
     if (req_js)
     {
+        let dev_id = req_js.device_id[0];
+
+        let dev = devsManage[dev_id];
+
+        if (dev.init == false)
+        {
+            dev.init = true;
+
+            dev.client_modbus = connectTcp508neth();
+
+            devClientMap.set(dev.client_modbus, dev_id);
+        }
+    
+        //如果是按钮，则看看variable字段中值是多少并发送相应报文
+    
         if (req_js.type == "button")
         {
             //如果是按钮事件则，写变量
             let variable = req_js.variable[0];
             let value = req_js.value[0]; 
         
-            sendDataToTcp508n(client_modbus, variable, value, 0x05);
+            sendDataToTcp508n(dev.client_modbus, variable, value, 0x05, dev);
         }
         else if(req_js.type == "label")
         {
             let variable = req_js.variable[0];
         
-            sendDataToTcp508n(client_modbus, variable, null, 0x01);
+            sendDataToTcp508n(dev.client_modbus, variable, null, 0x01, dev);
         }
         else
         {
@@ -206,9 +254,9 @@ function handleTcp508neth(req)
 }
 
 
-function sendDataToTcp508n(client_modbus, variable_, value, func)
+function sendDataToTcp508n(client_modbus, variable, value, func, dev)
 {
-    variable = variable_;
+    dev.variable = variable;
 
     if (func == 0x01)
     {

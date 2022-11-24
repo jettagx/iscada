@@ -97,19 +97,20 @@ function sysCtl(info)
     
 }
 
-let prjFile_ = '\
-{\
-  "device":[\
-  {"name":"tcp508neth","id":1}],\
-  \
-  "button":[\
-  {"name":"button_on","device_id":[1],"variable":[1],"value":[1],"x":120,"y":0},\
-  {"name":"button_off","device_id":[1],"variable":[1],"value":[0],"x":287,"y":16}],\
-  \
-  "label":[\
-  {"name":"led1","device_id":[1],"variable":[1],"x":201,"y":227}]\
-  }\
-';
+// let prjFile_ = '\
+// {\
+//   "device":[\
+//   {"name":"tcp508neth","id":1}],\
+//   \
+//   "button":[\
+//   {"name":"button_on","device_id":[1],"variable":[1],"value":[1],"x":120,"y":0},\
+//   {"name":"button_off","device_id":[1],"variable":[1],"value":[0],"x":287,"y":16}],\
+//   \
+//   "label":[\
+//   {"name":"led1","device_id":[1],"variable":[1],"x":201,"y":227}]\
+//   }\
+// ';
+
 // let prjFile_ = '\
 // {\
 //   "device":[\
@@ -120,6 +121,22 @@ let prjFile_ = '\
 //   {"name":"button_off","device_id":[1],"variable":[1],"value":[0],"x":287,"y":16}]\
 // }\
 // ';
+let prjFile_ = '\
+{\
+    "device":[\
+    {"name":"tcp508neth","id":1},\
+    {"name":"tcp508neth","id":2}],\
+    \
+    "button":[\
+    {"name":"button_on","device_id":[1],"variable":[1],"value":[1],"x":120,"y":0},\
+    {"name":"button_off","device_id":[1],"variable":[1],"value":[0],"x":287,"y":16},\
+    {"name":"button_on2","device_id":[2],"variable":[2],"value":[1],"x":120,"y":160},\
+    {"name":"button_off2","device_id":[2],"variable":[2],"value":[0],"x":287,"y":160}],\
+    \
+    "label":[\
+    {"name":"led1","device_id":[1],"variable":[1],"x":201,"y":127}]\
+    }\
+}';
 
 
 let result = jsonParse(prjFile_);

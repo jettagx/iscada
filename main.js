@@ -54,6 +54,9 @@ app.on('window-all-closed', () => {
 let devMap = new Map();
 let clinetInit = false;
 
+ //用nodejs API创建tcp客户端
+ let socketClient;
+
 
 //根据dev的类型创建网络连接
 function startCommu(dev)
@@ -64,14 +67,16 @@ function startCommu(dev)
     return;
   }
 
-  //用nodejs API创建tcp客户端
-  socketClient = net.connect({host:'127.0.0.1', port:5000},  () => {
-    console.log('connected to server!');
-  });
-  
-  socketClient.on('end', () => {
-    console.log('disconnected from server');
-  });
+  if (!socketClient)
+  {
+    socketClient = net.connect({host:'127.0.0.1', port:5000},  () => {
+      console.log('connected to server!');
+    });
+    
+    socketClient.on('end', () => {
+      console.log('disconnected from server');
+    });
+  }
 
   devMap.set(dev.name,socketClient);
 }
