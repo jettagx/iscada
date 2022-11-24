@@ -8,17 +8,38 @@ fake_dev.value = 0;
 
 let client;
 
+
+const IDLE = 0;
+const BUSY = 1;
+let devCommuState = IDLE;
+let devCommu = [];
+let devCommuData = [];
+
+
 // 创建TCP服务器
 const server = net.createServer(function (client_) {
     console.log('someones connects');
 
-    client = client_;
+    //client = client_;//不能直接赋值
 
     // 接收客户端的数据
     client_.on('data', function (data) {
         //console.log('server recv client data:', data.toString('utf-8'));
-        //client.write(data);
-        handleClient(data.toString('utf-8'));
+        
+        //不能直接处理，而要判断当前是否忙
+        //将客户端入数组
+        devCommu.push(client_);
+        devCommuData.push(data);
+
+        if (devCommuState == IDLE)
+        {
+            devCommuState = BUSY;
+
+            client = devCommu.shift();//从数组取出连接
+            devCommuData.shift();
+
+            handleClient(data.toString('utf-8'));
+        }
     });
 
     // 客户端连接关闭
@@ -93,6 +114,23 @@ let client_modbus;
 
 let variable;
 
+function changeClient()
+{
+    //如果有挂起的，解挂处理，标志位保持BUSY
+    //如果没有挂起的，标志位置为IDLE
+    if (devCommu.length)
+    {
+        client = devCommu.shift();//如果有挂起的解挂，并处理
+        let data = devCommuData.shift();
+
+        handleClient(data.toString('utf-8'));
+    }
+    else
+    {
+        devCommuState = IDLE;
+    }
+}
+
 function connectTcp508neth()
 {
   //用nodejs API创建tcp客户端
@@ -107,8 +145,8 @@ function connectTcp508neth()
 
   socketClient.on('data', (data) => {
     //console.log('recv data from tcp508n');
-    //收到tcp608n的返回数据
-
+    //收到tcp508n的返回数据
+    
     if (data[7] == 0x01)
     {
         //如果是标签，返回变量的值
@@ -123,6 +161,8 @@ function connectTcp508neth()
         let replyWrite = '{"result":"ok"}';
         client.write(replyWrite);//返回数据给浏览器端
     }
+
+    changeClient();
 });
 
   return socketClient;
