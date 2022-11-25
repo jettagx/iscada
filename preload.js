@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer} = require('electron');
 
-let recCb;
+//let recCb;//创建多个设备，不然会覆盖
+
+let devsManage = [];
 
 contextBridge.exposeInMainWorld('createCommus', {
   //node: () => process.versions.node,
@@ -11,16 +13,20 @@ contextBridge.exposeInMainWorld('createCommus', {
   startCommu:(dev) => ipcRenderer.invoke('startCommu', dev).then((result) => {
   }),
   devCommu:(dev, info, cb) => {
-    recCb = cb;
+    let dev_id = dev.id;
+
+    devsManage[dev_id] = cb;
+
     ipcRenderer.invoke('devCommu', dev, info).then((result) => {
   });
   }
 });
 
-ipcRenderer.on('dataFromServer', function(event, message) 
+ipcRenderer.on('dataFromServer', function(event, message, dev_id) 
 {
-  console.log("dataFromServer: " + message);
-  recCb(message);
+  //console.log("dataFromServer: " + message);
+  
+  devsManage[dev_id](message);
 });
 
 

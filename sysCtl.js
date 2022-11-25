@@ -63,38 +63,45 @@ function sysCtl(info)
 
     //开始标签的读操作
     //循环采集showThings中的数据
+    //不同的设备拥有不同的showThings
+    //遍历不同的设备，查找showThings
     let index = 0;
 
-    if (showThings.length)
+    for (i = 1; i <= info.device.length; i++)
     {
-        //如果有读的数据
-        //取出读数据
-        function cb(data)
+        let dev = devsManage[i];
+
+        if (dev.showThings.length)
         {
-            //设置标签控件的显示
-            //data为字符串，先转换为js对象
-            let tmp;
-            if(tmp = jsonParse(data))
+            //如果有读的数据
+            //取出读数据
+            function cb(data)
             {
-                //再去读下一个数据，直到读到所有数据，再重头读
-                index++;
-                if (index == showThings.length)
+                //设置标签控件的显示
+                //data为字符串，先转换为js对象
+                let tmp;
+                
+                if(tmp = jsonParse(data))
                 {
-                    index = 0;
-                }
-
-                //更新标签
-                let showThing = showThings[index];
-                showThing.value = tmp.result;
-                updateGui();//更新渲染标签
-
-                devStartCommu(showThings[index],cb);
-            }
-        }
-
-        devStartCommu(showThings[index],cb);
-    }
+                    //再去读下一个数据，直到读到所有数据，再重头读
+                    index++;
+                    if (index == dev.showThings.length)
+                    {
+                        index = 0;
+                    }
     
+                    //更新标签
+                    let showThing = dev.showThings[index];
+                    showThing.value = tmp.result;
+                    updateGui();//更新渲染标签
+    
+                    devStartCommu(dev.showThings[index],cb);
+                }
+            }
+    
+            devStartCommu(dev.showThings[index],cb);
+        }
+    }
 }
 
 // let prjFile_ = '\

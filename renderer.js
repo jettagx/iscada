@@ -72,7 +72,9 @@ function handleLabel(label)
   showParam.push(label);
 
   showLabel(label);
-  showThings.push(label);
+
+  let dev = devsManage[label.device_id[0]];
+  dev.showThings.push(label);
 }
 
 function findClickedThing(mouse)
