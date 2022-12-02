@@ -1,6 +1,7 @@
 const { app, BrowserWindow,ipcMain } = require('electron');
 const path = require('path');
 const net = require('net');
+const fs = require('fs').promises;
 
 const Obj2json_ = require('./Obj2json');
 
@@ -27,7 +28,11 @@ const createWindow = () => {
 
   ipcMain.handle('startCommu', (event, dev) => {startCommu(dev)});
   ipcMain.handle('devCommu', (event, dev, info) => {devCommu(dev, info)});
-
+  ipcMain.handle('readLuaFile', async (event, fileName) => {
+    //调用fs读取文件，返回文件数组
+    const data = await fs.readFile(fileName);
+    return data;
+  })
 
   win.loadFile('index.html');
   win.webContents.openDevTools();

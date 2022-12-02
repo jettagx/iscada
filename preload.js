@@ -22,6 +22,15 @@ contextBridge.exposeInMainWorld('createCommus', {
   }
 });
 
+contextBridge.exposeInMainWorld('lua', {
+  //node: () => process.versions.node,
+  //chrome: () => process.versions.chrome,
+  //electron: () => process.versions.electron,
+  //ping: () => ipcRenderer.invoke('ping'),
+  // we can also expose variables, not just functions
+  readfile:(fileName) => ipcRenderer.invoke('readLuaFile', fileName)
+});
+
 ipcRenderer.on('dataFromServer', function(event, message, dev_id) 
 {
   //console.log("dataFromServer: " + message);
