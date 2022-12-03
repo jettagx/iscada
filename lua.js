@@ -281,19 +281,162 @@ function unDump(file)
     return reader.readProto("");
 }
 
-function printCode(proto)
-{
-    for(let i = 0; i < proto.Code.length; i++)
-    {
-        console.log("%d 0x%s", i+1, proto.Code[i].toString(16));
-    }
-}
 
 //打印输出获得的信息
 function list(proto)
 {
     printCode(proto);
 }
+
+const OpArgN = 0;
+const OpArgU = 1;
+const OpArgR = 2;
+const OpArgK = 3;
+
+const IABC = 0;
+const IABx = 1;
+const IAsBx = 2;
+const IAx = 3;
+
+
+let opCodes = [];
+
+opCodes[0x6]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP");
+opCodes[0x1]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK");
+opCodes[0x24] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL");
+opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN");
+
+function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name)
+{
+    let i = {};
+    i.testFlag = testFlag; 
+    i.setAFlag = setAFlag;
+    i.argBMode = argBMode;
+    i.argCMode = argCMode;
+    i.opMode = opMode;
+    i.name = name;
+
+    return i;
+}
+
+// 参数是4字节的指令
+function inst(instruction)
+{
+    let inst = {};
+
+    function opCode(instruction)
+    {
+        return instruction & 0x3F;
+    }
+
+    function ABC()
+    {
+        a = instruction >> 6 & 0xFF;
+        c = instruction >> 14 & 0x1FF;
+        b = instruction >> 23 & 0x1FF;
+
+        return {a,b,c};
+    }
+
+    function ABx()
+    {
+        a = instruction >> 6 & 0xFF;
+        bx = instruction >> 14;
+
+        return {a,bx};
+    }
+
+    inst.instruction = instruction;
+    inst.opCode = opCode;
+    inst.OpInfo = opCodes[opCode(instruction)];
+    inst.abc = ABC;
+    inst.abx = ABx;
+
+    return inst;
+}
+
+function printOperands(inst)
+{
+    let OpInfo = inst.OpInfo;
+
+    switch (OpInfo.opMode) {
+        case IABC:
+            
+            let val = inst.abc();
+            let a = val.a;
+            let b = val.b;
+            let c = val.c;
+
+            console.log(a);
+
+            if (OpInfo.argBMode != OpArgN)
+            {
+                if (b > 0xff)
+                {
+                    console.log(" %d", -1-(b&0xff));
+                }
+                else
+                {
+                    console.log(" %d", b);
+                }
+            }
+
+            if (OpInfo.argCMode != OpArgN)
+            {
+                if (c > 0xff)
+                {
+                    console.log(" %d", -1-(c&0xff));
+                }
+                else
+                {
+                    console.log(" %d", c);
+                }
+            }
+            break;
+
+        case IABx:
+            let val_ = inst.abx();
+            let a_ = val_.a;
+            let bx = val_.bx;
+
+            console.log(a_);
+
+            if (OpInfo.argBMode == OpArgK)
+            {
+                console.log(" %d", -1-bx);
+            }
+            else if (OpInfo.argBMode == OpArgU)
+            {
+                console.log(" %d", bx);
+            }
+        
+            break;
+    
+        default:
+            break;
+    }
+}
+
+function printCode(proto)
+{
+    // for(let i = 0; i < proto.Code.length; i++)
+    // {
+    //     console.log("%d 0x%s", i+1, proto.Code[i].toString(16));
+    // }
+
+    for(let i = 0; i < proto.Code.length; i++)
+    {
+        let code = proto.Code[i];
+        let inst_ = inst(code);
+
+        //打印指令码名称
+        console.log("%d %s", i+1, inst_.OpInfo.name);
+
+        //打印指令码参数
+        printOperands(inst_);
+    }
+}
+
 
 function luaMain()
 {
