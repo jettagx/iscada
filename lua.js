@@ -1,5 +1,3 @@
-
-
 function newReader(file)
 {
     let reader = {};
@@ -255,7 +253,7 @@ function newReader(file)
             Source : source,
             LineDefined : reader.readUint32(),
             LastLineDefined : reader.readUint32(),
-            NumParam : reader.readByte(),
+            NumParams : reader.readByte(),
             IsVararg : reader.readByte(),
             MaxStackSize : reader.readByte(),
             Code : reader.readCode(),
@@ -301,12 +299,32 @@ const IAx = 3;
 
 let opCodes = [];
 
-opCodes[0x6]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP");
-opCodes[0x1]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK");
-opCodes[0x24] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL");
-opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN");
+opCodes[0x6]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
+opCodes[0x1]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
+opCodes[0x24] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL", _call);
+opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
 
-function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name)
+function _getTabUp(inst, ls)
+{
+    console.log("_getTabUp");
+}
+
+function _loadK(inst, ls)
+{
+    console.log("_loadK");
+}
+
+function _call(inst, ls)
+{
+    console.log("_call");
+}
+
+function _return(inst, ls)
+{
+    console.log("_return");
+}
+
+function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name, action)
 {
     let i = {};
     i.testFlag = testFlag; 
@@ -315,6 +333,7 @@ function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name)
     i.argCMode = argCMode;
     i.opMode = opMode;
     i.name = name;
+    i.action = action;
 
     return i;
 }
@@ -324,7 +343,7 @@ function inst(instruction)
 {
     let inst = {};
 
-    function opCode(instruction)
+    function opCode()
     {
         return instruction & 0x3F;
     }
@@ -346,11 +365,19 @@ function inst(instruction)
         return {a,bx};
     }
 
+    function execute(ls)
+    {
+        let action = opCodes[inst.opCode()].action;
+
+        action(inst, ls);
+    }
+
     inst.instruction = instruction;
     inst.opCode = opCode;
-    inst.OpInfo = opCodes[opCode(instruction)];
+    inst.OpInfo = opCodes[opCode()];
     inst.abc = ABC;
     inst.abx = ABx;
+    inst.execute = execute;
 
     return inst;
 }
@@ -419,11 +446,6 @@ function printOperands(inst)
 
 function printCode(proto)
 {
-    // for(let i = 0; i < proto.Code.length; i++)
-    // {
-    //     console.log("%d 0x%s", i+1, proto.Code[i].toString(16));
-    // }
-
     for(let i = 0; i < proto.Code.length; i++)
     {
         let code = proto.Code[i];
@@ -437,18 +459,339 @@ function printCode(proto)
     }
 }
 
+//////////////////////////////////////////////////
+function newLuaStack(size, state)
+{
+    let t = {};
+
+    t.slots = new Array(size);
+    t.top = 0;
+    t.prev = null;
+    t.pc = 0;
+    t.state = state;
+
+    t.push = function(val)
+    {
+        if (t.top == t.slots.length)
+        {
+            throw "newLuaStack full";
+        }
+        console.log("stack push value:", val);
+        t.slots[t.top] = val;
+        t.top++;
+    }
+
+    t.pop = function()
+    {
+        if (t.top < 1)
+        {
+            throw "newLuaStack empty";
+        }
+
+        t.top--;
+
+        let val = t.slots[t.top];
+        t.slots[t.top] = null;
+
+        console.log("stack pop value :", val);
+
+        return val;
+    }
+
+    t.absIndex = function(idx)
+    {
+        if (idx >= 0)
+        {
+            return idx;
+        }
+
+        return idx + t.top + 1;
+    };
+
+    t.get = function(idx)
+    {
+        let absIndex_ = t.absIndex(idx);
+
+        if (absIndex_ > 0 && absIndex_ <= t.top)
+        {
+            return t.slots[absIndex_-1];
+        }
+        else
+        {
+            return null;
+        }
+    };
+
+    t.popN = function(n)
+    {
+        let vals = new Array(n);
+
+        for (let i = n-1; i >= 0; i--)
+        {
+            vals[i] = t.pop();
+        }
+
+        return vals;
+    };
+
+    t.pushN = function(vals, n)
+    {
+        let len = vals.length;
+
+        if (n < 0)
+        {
+            n = len;
+        }
+
+        for (let i = 0; i < n; i++)
+        {
+            if (i < len)
+            {
+                t.push(vals[i]);
+            }
+            else
+            {
+                t.push(null);
+            }
+        }
+    };
+
+    return t;
+}
+
+const LUA_RIDX_GLOBALS = 2;
+const LUA_MINSTACK = 20;
+
+//创建表格对象,暂时只考虑map情况
+function newLuaTable(nArr, nRec)
+{
+    let i = {};
+
+    i._map = new Map();
+
+    i.put = function (key, val)
+    {
+        //将值写入map
+        i._map.set(key, val);
+    };
+
+    i.get = function(key)
+    {
+        return i._map.get(key);
+    };
+
+    return i;
+}
+
+function newLuaClosure(proto)
+{
+    let c = {};
+    c.proto = proto;
+
+    //支持upvalues
+    if (proto.Upvalues.length > 0)
+    {   
+        c.upvals = new Array(proto.Upvalues.length);
+    }
+
+    return c;
+}
+
+function newJsClosure(jsFunction, nUpvals)
+{
+    let c = {};
+    c.jsFunction = jsFunction;
+
+    //支持upvalues
+    if (nUpvals > 0)
+    {   
+        c.upvals = new Array(nUpvals);
+    }
+
+    return c;
+}
+
+function newLuaState()
+{
+    let ls = {};
+    ls.registry = newLuaTable(0, 0);
+    ls.registry.put(LUA_RIDX_GLOBALS, newLuaTable(0, 0));
+    ls.stack = null;
+
+    ls.pushLuaStack = function (stack)
+    {
+        stack.prev = ls.stack;
+        ls.stack = stack;
+    }
+
+    ls.popLuaStack = function ()
+    {
+        let stack = ls.stack;
+        ls.stack = stack.prev;
+        stack.prev = null;
+    }
+
+    ls.load = function(fileData, chunkName, mode)
+    {
+        //只支持载入虚拟机文件
+        let proto = unDump(fileData);
+
+        let c = newLuaClosure(proto);
+
+        ls.stack.push(c);
+
+        return 0;
+    }
+
+    //设置表格t的键k为值v
+    ls.setTable = function(t, k, v, raw)
+    {
+        t.put(k, v);
+    }
+
+    ls.pushJsFunction = function(jsFunction)
+    {
+        ls.stack.push(newJsClosure(jsFunction, 0));
+    };
+
+    ls.setGlobal = function(name)
+    {
+        let t = ls.registry.get(LUA_RIDX_GLOBALS);//得到全局表
+
+        let v = ls.stack.pop();//弹出函数
+
+        console.log("set global :", name, v);
+        ls.setTable(t, name, v, false);//设置全局表
+    };
+
+    //注册函数
+    ls.register = function(name, jsFunction)
+    {
+        ls.pushJsFunction(jsFunction);
+        ls.setGlobal(name);
+    };
+
+    ls.callJsClosure = function()
+    {
+    };
+
+    //调用lua函数
+    ls.callLuaClosure = function(nArgs, nResults, c)
+    {
+        let nRegs = c.proto.MaxStackSize;
+        let nParams = c.proto.NumParams;
+
+        let isVararg = c.proto.IsVararg == 1;
+
+        let newStack = newLuaStack(nRegs + 20);//新建运行栈
+        newStack.closure = c;
+
+        ////////////////////////////////////////////////
+        let funcAndArgs = ls.stack.popN(nArgs + 1);//弹出函数和参数
+        funcAndArgs.splice(0, 1)//去除函数
+        newStack.pushN(funcAndArgs, nParams);//压入参数
+
+        newStack.top = nRegs;
+
+        if (nArgs > nParams && isVararg)
+        {
+            throw "callLuaClosure error";
+        }
+
+        ls.pushLuaStack(newStack);
+        ls.runLuaClosure();//运行函数
+        ls.popLuaStack();
+
+        if (nResults != 0)
+        {
+            //如果有返回值，将返回值复制到调用函数顶部
+            let results = newStack.popN(newStack.top - nRegs);
+
+            //ls.stack.check(results.length)检查调用栈是否够
+
+            ls.stack.pushN(results, nResults);
+
+        }
+    };
+
+
+    //调用js函数
+    ls.fetch = function()
+    {
+        let i = ls.stack.closure.proto.Code[ls.stack.pc];
+        ls.stack.pc++;
+
+        return i;
+    };
+    
+
+    const OP_RETURN = 0x26;
+    //调用js函数
+    ls.runLuaClosure = function()
+    {
+        while(1)
+        {
+            let code = ls.fetch();//得到要执行的指令
+            let inst_ = inst(code);//解码指令
+
+            inst_.execute(ls);//执行指令
+
+            if (inst_.opCode() == OP_RETURN)//如果是return语句，退出执行
+            {
+                break;
+            }
+        }
+    };
+
+    ls.call = function(nArgs, nResults)
+    {
+        //弹出栈里元素--函数
+        let c = ls.stack.get(-(nArgs + 1));
+
+        //调用函数，有两种情况，js函数和lua函数
+        if (c.proto)
+        {
+            ls.callLuaClosure(nArgs, nResults, c);
+        }
+        else
+        {
+            ls.callJsClosure(nArgs, nResults, c);
+        }
+    };
+
+    ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
+
+    return ls;
+}
+
+
+//////////////////////////////////////////////////
+
+function print(ls)
+{
+    //得到
+    console.log("hello world!");
+    return 0;
+}
 
 function luaMain()
 {
     let file = lua.readfile("luac.out");
 
     file.then(fileData =>{
-        if (fileData != "")
-        {
-            let proto = unDump(fileData);
+        // if (fileData != "")
+        // {
+        //     let proto = unDump(fileData);
     
-            list(proto);
-        }
+        //     list(proto);
+        // }
+
+        let ls = newLuaState();//创建state
+        ls.register("print", print);//注册print函数
+
+        ls.load(fileData, "any", "bt");
+
+        ls.call(0, 0);
     });
     
 }
