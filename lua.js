@@ -304,24 +304,91 @@ opCodes[0x1]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
 opCodes[0x24] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL", _call);
 opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
 
+const LUAI_MAXSTACK = 1000000;
+const LUA_REGISTRYINDEX = -LUAI_MAXSTACK - 1000;
+
+function luaUpvalueIndex(i)
+{
+    return LUA_REGISTRYINDEX - i;
+}
+
+function _pushFuncAndArgs(a, b, ls)
+{
+    if (b >= 1)
+    {
+        //ls.checkStack(b)
+        for (let i = a; i < a+b; i++)
+        {
+            ls.pushValue(i);//压入函数和函数参数
+        }
+
+        return b - 1;
+    }
+    else
+    {
+        throw "_pushFuncAndArgs error";
+    }
+}
+
+function _popResults(a, c, ls)
+{
+    if (c == 1)
+    {
+        //无动作
+    }
+    else if (c > 1)
+    {
+        for (let i = a + c - 2; i >= a; i--)
+        {
+            ls.replace(i);
+        }
+    }
+    else
+    {
+        throw "_popResults == 0 error";
+    }
+}
+
 function _getTabUp(inst, ls)
 {
-    console.log("_getTabUp");
+    //console.log("_getTabUp");
+    let i = inst.abc();
+
+    let a = i.a + 1;
+    let b = i.b + 1;
+    let c = i.c;
+
+    //console.log(a,b,c);
+
+    ls.getRK(c);//得到key
+    ls.getTable(luaUpvalueIndex(b));//得到全局表
+    ls.replace(a);
 }
 
 function _loadK(inst, ls)
 {
-    console.log("_loadK");
+    let i = inst.abx();
+    let a = i.a + 1;
+    let bx = i.bx;
+
+    ls.getConst(bx);
+    ls.replace(a);
 }
 
 function _call(inst, ls)
 {
-    console.log("_call");
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+    let c = i.c;
+
+    let nArgs = _pushFuncAndArgs(a, b, ls);
+    ls.call(nArgs, c-1);
+    _popResults(a, c, ls);
 }
 
 function _return(inst, ls)
 {
-    console.log("_return");
 }
 
 function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name, action)
@@ -510,6 +577,25 @@ function newLuaStack(size, state)
 
     t.get = function(idx)
     {
+        if (idx < LUA_REGISTRYINDEX)//访问的是upvalues
+        {
+            let uvIdx = LUA_REGISTRYINDEX - idx - 1;
+            let c = t.closure;
+
+            if (c == null || uvIdx >= c.upvals.length)
+            {
+                return null;
+            }
+
+            return c.upvals[uvIdx];//注意load（）时候upvals要先赋值！！！
+        }
+
+        if (idx == LUA_REGISTRYINDEX)
+        {
+            return t.state.registry;
+        }
+
+
         let absIndex_ = t.absIndex(idx);
 
         if (absIndex_ > 0 && absIndex_ <= t.top)
@@ -520,6 +606,19 @@ function newLuaStack(size, state)
         {
             return null;
         }
+    };
+
+    t.set = function(idx, val)
+    {
+        //LUA_REGISTRYINDEX相关先不处理
+        let absIdx = t.absIndex(idx);
+        if (absIdx > 0 && absIdx <= t.top)
+        {
+            t.slots[absIdx-1] = val;
+            return;
+        }
+
+        throw "stack set error";
     };
 
     t.popN = function(n)
@@ -618,6 +717,53 @@ function newLuaState()
     ls.registry.put(LUA_RIDX_GLOBALS, newLuaTable(0, 0));
     ls.stack = null;
 
+    ls.replace = function(idx)
+    {
+        let val = ls.stack.pop();
+        ls.stack.set(idx, val);
+    };
+
+    ls.getTable_ = function(t, k, raw)
+    {
+        //将t的k键压入lua栈
+        let v = t.get(k);
+        ls.stack.push(v);
+    };
+
+    ls.getTable = function(idx)
+    {
+        let t = ls.stack.get(idx);//需要修改get函数，使得能访问全局表
+        
+        let k = ls.stack.pop();
+        
+        return ls.getTable_(t, k, false);
+    };
+
+    ls.getConst = function (idx)
+    {
+        let c = ls.stack.closure.proto.Constants[idx];
+        ls.stack.push(c);
+    }
+
+    ls.pushValue = function (idx)
+    {
+        let c = ls.stack.get(idx);
+        ls.stack.push(c);
+    }
+
+    ls.getRK = function (rk)
+    {
+        if (rk > 0xff)
+        {
+            ls.getConst(rk & 0xff);//得到常量表内容
+        }
+        else
+        {
+            ls.pushValue(rk + 1);//得到寄存器内容
+        }
+    };
+    
+
     ls.pushLuaStack = function (stack)
     {
         stack.prev = ls.stack;
@@ -639,6 +785,13 @@ function newLuaState()
         let c = newLuaClosure(proto);
 
         ls.stack.push(c);
+
+        //设置upvals
+        if (proto.Upvalues.length > 0)
+        {
+            let env = ls.registry.get(LUA_RIDX_GLOBALS);//得到全局表
+            c.upvals[0] = env;
+        }
 
         return 0;
     }
@@ -671,8 +824,26 @@ function newLuaState()
         ls.setGlobal(name);
     };
 
-    ls.callJsClosure = function()
+    //调用js函数
+    ls.callJsClosure = function(nArgs, nResults, c)
     {
+        let newStack = newLuaStack(nArgs + 20);
+        newStack.closure = c;
+
+        let args = ls.stack.popN(nArgs);
+        newStack.pushN(args, nArgs);
+        ls.stack.pop();
+
+        ls.pushLuaStack(newStack);
+        let r = c.jsFunction(ls);//运行js函数
+        ls.popLuaStack();
+
+        if (nResults != 0)
+        {
+            let results = newStack.popN(r);
+            //ls.stack.check(results.length);
+            ls.stack.pushN(results, nResults);
+        }
     };
 
     //调用lua函数
@@ -769,8 +940,9 @@ function newLuaState()
 
 function print(ls)
 {
-    //得到
-    console.log("hello world!");
+    //得到传来的参数
+    console.log(ls.stack.pop());
+    
     return 0;
 }
 
