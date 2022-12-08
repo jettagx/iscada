@@ -303,6 +303,7 @@ opCodes[0x6]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[0x1]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
 opCodes[0x24] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL", _call);
 opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
+opCodes[0xd] =  getOpInfo(0, 1, OpArgK, OpArgK, IABC, "ADD", _add);
 
 const LUAI_MAXSTACK = 1000000;
 const LUA_REGISTRYINDEX = -LUAI_MAXSTACK - 1000;
@@ -390,6 +391,27 @@ function _call(inst, ls)
 function _return(inst, ls)
 {
 }
+
+const LUA_OPADD = 0;
+
+function _binaryArith(inst, ls, op)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+    let c = i.c;
+
+    ls.getRK(b);
+    ls.getRK(c);
+    ls.arith(op);
+    ls.replace(a);
+}
+
+function _add(inst, ls)
+{
+    _binaryArith(inst, ls, LUA_OPADD);
+}
+
 
 function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name, action)
 {
@@ -930,6 +952,21 @@ function newLuaState()
         }
     };
 
+    ls.pushInteger = function(n)
+    {
+        ls.stack.push(n);
+    };
+
+    ls.arith = function(op)
+    {
+        //只处理加法指令
+        let a,b;
+        b = ls.stack.pop();
+        a = ls.stack.pop();
+
+        ls.stack.push(a+b);
+    };
+
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
 
     return ls;
@@ -960,6 +997,15 @@ function luaMain()
 
         let ls = newLuaState();//创建state
         ls.register("print", print);//注册print函数
+
+        let a = 3;
+        let b = 4;
+
+        ls.pushInteger(a);//入栈一个整数
+        ls.setGlobal("a");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"a"
+
+        ls.pushInteger(b);//入栈一个整数
+        ls.setGlobal("b");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"b"
 
         ls.load(fileData, "any", "bt");
 
