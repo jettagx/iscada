@@ -306,6 +306,8 @@ opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
 opCodes[0xd] =  getOpInfo(0, 1, OpArgK, OpArgK, IABC, "ADD", _add);
 opCodes[0x22] =  getOpInfo(1, 0, OpArgN, OpArgU, IABC, "TEST", _test);
 opCodes[0x1e] =  getOpInfo(0, 0, OpArgR, OpArgN, IAsBx, "JMP", _jmp);
+opCodes[0x2c] =  getOpInfo(0, 1, OpArgU, OpArgN, IABx, "CLOSURE", _closure);
+opCodes[0x08] =  getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABUP", _settabup);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -443,7 +445,30 @@ function _jmp(inst, ls)
     }
 }
 
+function _closure(inst, ls)
+{
+    console.log("_closure");
+    let i = inst.abx();
 
+    let a = i.a + 1;
+    let bx = i.bx;
+
+    ls.loadProto(bx);
+    ls.replace(a);
+}
+
+function _settabup(inst, ls)
+{
+    console.log("_settabup");
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+    let c = i.c;
+
+    ls.getRK(b);
+    ls.getRK(c);
+    ls.setTable_(luaUpvalueIndex(a));
+}
 
 
 function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name, action)
@@ -790,6 +815,32 @@ function newLuaState()
     ls.registry.put(LUA_RIDX_GLOBALS, newLuaTable(0, 0));
     ls.stack = null;
 
+    //将子函数载入栈中
+    ls.loadProto = function(idx)
+    {
+        let subProto = ls.stack.closure.proto.Protos[idx];
+
+        let closure = newLuaClosure(subProto);
+
+        //console.log("ls.stack.push(closure);",closure)
+        ls.stack.push(closure);
+
+        //支持upvalue，暂不支持引用函数外变量
+        for (let i = 0; i < subProto.Upvalues.length; i++)
+        {
+            let uvIdx = subProto.Upvalues[i].Idx;
+
+            if (subProto.Upvalues[i].Instack == 1)
+            {
+                throw "loadProto unsupport";
+            }
+            else
+            {
+                closure.upvals[i] = ls.stack.closure.upvals[uvIdx];
+            }
+        }
+    };
+
     ls.addPC = function(n)
     {
         ls.stack.pc += n;
@@ -878,6 +929,15 @@ function newLuaState()
         }
 
         return 0;
+    }
+
+    ls.setTable_ = function(idx)
+    {
+        let t = ls.stack.get(idx);
+        let v = ls.stack.pop();
+        let k = ls.stack.pop();
+
+        ls.setTable(t, k, v, false);
     }
 
     //设置表格t的键k为值v
@@ -1060,7 +1120,7 @@ function luaMain()
         let ls = newLuaState();//创建state
         ls.register("print", print);//注册print函数
 
-        let a = 0;
+        let a = 1;
         let b = 0;
 
         ls.pushInteger(a);//入栈一个整数
