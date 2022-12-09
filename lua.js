@@ -308,6 +308,7 @@ opCodes[0x22] =  getOpInfo(1, 0, OpArgN, OpArgU, IABC, "TEST", _test);
 opCodes[0x1e] =  getOpInfo(0, 0, OpArgR, OpArgN, IAsBx, "JMP", _jmp);
 opCodes[0x2c] =  getOpInfo(0, 1, OpArgU, OpArgN, IABx, "CLOSURE", _closure);
 opCodes[0x08] =  getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABUP", _settabup);
+opCodes[0x1f] =  getOpInfo(1, 0, OpArgK, OpArgK, IABC, "EQ", _eq);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -468,6 +469,32 @@ function _settabup(inst, ls)
     ls.getRK(b);
     ls.getRK(c);
     ls.setTable_(luaUpvalueIndex(a));
+}
+
+const LUA_OPEQ = 0;
+
+function _eq(inst, ls)
+{
+    console.log("_eq");
+    _compare(inst, ls, LUA_OPEQ);
+}
+
+function _compare(inst, ls, op)
+{
+    let i = inst.abc();
+
+    let a = i.a;
+    let b = i.b;
+    let c = i.c;
+
+    ls.getRK(b);
+    ls.getRK(c);
+
+    if (ls.compare(-2, -1, op) != (a != 0))
+    {
+        ls.addPC(1);
+    }
+    ls.pop(2);
 }
 
 
@@ -815,6 +842,27 @@ function newLuaState()
     ls.registry.put(LUA_RIDX_GLOBALS, newLuaTable(0, 0));
     ls.stack = null;
 
+    ls.pop = function(n)
+    {
+        ls.stack.popN(n);
+    };
+
+    ls.compare = function(idx1, idx2, op)
+    {
+        let a = ls.stack.get(idx1);
+        let b = ls.stack.get(idx2);
+
+        //暂时只支持==
+        if (op == LUA_OPEQ)
+        {
+            return (a == b);
+        }
+        else
+        {
+            throw "ls.compare error";
+        }
+    };
+
     //将子函数载入栈中
     ls.loadProto = function(idx)
     {
@@ -844,7 +892,7 @@ function newLuaState()
     ls.addPC = function(n)
     {
         ls.stack.pc += n;
-    }
+    };
 
     ls.toBoolean = function (idx)
     {
@@ -878,13 +926,13 @@ function newLuaState()
     {
         let c = ls.stack.closure.proto.Constants[idx];
         ls.stack.push(c);
-    }
+    };
 
     ls.pushValue = function (idx)
     {
         let c = ls.stack.get(idx);
         ls.stack.push(c);
-    }
+    };
 
     ls.getRK = function (rk)
     {
@@ -903,14 +951,14 @@ function newLuaState()
     {
         stack.prev = ls.stack;
         ls.stack = stack;
-    }
+    };
 
     ls.popLuaStack = function ()
     {
         let stack = ls.stack;
         ls.stack = stack.prev;
         stack.prev = null;
-    }
+    };
 
     ls.load = function(fileData, chunkName, mode)
     {
@@ -929,7 +977,7 @@ function newLuaState()
         }
 
         return 0;
-    }
+    };
 
     ls.setTable_ = function(idx)
     {
@@ -938,13 +986,13 @@ function newLuaState()
         let k = ls.stack.pop();
 
         ls.setTable(t, k, v, false);
-    }
+    };
 
     //设置表格t的键k为值v
     ls.setTable = function(t, k, v, raw)
     {
         t.put(k, v);
-    }
+    };
 
     ls.pushJsFunction = function(jsFunction)
     {
@@ -1105,6 +1153,19 @@ function print(ls)
     return 0;
 }
 
+function setValue(ls)
+{
+    console.log("setValue()");
+    //console.log(ls.stack.pop());
+    //console.log(ls.stack.pop());
+    let val = ls.stack.pop();
+    let label = ls.stack.pop();
+
+    label.val = val;
+
+    console.log("setValue() update:", label.val);
+}
+
 function luaMain()
 {
     let file = lua.readfile("luac.out");
@@ -1118,16 +1179,36 @@ function luaMain()
         // }
 
         let ls = newLuaState();//创建state
-        ls.register("print", print);//注册print函数
+        //ls.register("print", print);//注册print函数
 
-        let a = 1;
-        let b = 0;
+        // let a = 1;
+        // let b = 0;
 
-        ls.pushInteger(a);//入栈一个整数
-        ls.setGlobal("a");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"a"
+        // ls.pushInteger(a);//入栈一个整数
+        // ls.setGlobal("a");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"a"
 
-        ls.pushInteger(b);//入栈一个整数
-        ls.setGlobal("b");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"b"
+        // ls.pushInteger(b);//入栈一个整数
+        // ls.setGlobal("b");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"b"
+
+        ls.register("setValue", setValue);//注册print函数
+
+        let labelA = 1;
+        let labelB = 1;
+        let labelC = 1;
+
+        let labelShow = {val:"",type:"label"};
+
+        ls.pushInteger(labelA);//入栈一个整数
+        ls.setGlobal("labelA");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelA"
+
+        ls.pushInteger(labelB);//入栈一个整数
+        ls.setGlobal("labelB");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelB"
+
+        ls.pushInteger(labelC);//入栈一个整数
+        ls.setGlobal("labelC");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelC"
+
+        ls.pushInteger(labelShow);//入栈一个标签
+        ls.setGlobal("labelShow");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelC"
 
         ls.load(fileData, "any", "bt");
 
