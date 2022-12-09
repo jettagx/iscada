@@ -104,7 +104,7 @@ function newReader(file)
 
     reader.readLuaInteger = function ()
     {
-        return reader.readInt64();
+        return Number(reader.readInt64());
     }
 
     reader.readLuaNumber = function ()
@@ -128,12 +128,12 @@ function newReader(file)
     reader.readConstant = function ()
     {
         //读取常量表数据
-        const TAG_NIL = 0;
-        const TAG_BOOLEAN = 1;
-        const TAG_NUMBER = 2;
-        const TAG_INTEGER = 3;
-        const TAG_SHORT_STR = 4;
-        const TAG_LONG_STR = 5;
+        const TAG_NIL = 0x0;
+        const TAG_BOOLEAN = 0x1;
+        const TAG_NUMBER = 0x3;
+        const TAG_INTEGER = 0x13;
+        const TAG_SHORT_STR = 0x4;
+        const TAG_LONG_STR = 0x14;
 
         switch (reader.readByte())
         {
@@ -304,6 +304,9 @@ opCodes[0x1]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
 opCodes[0x24] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL", _call);
 opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
 opCodes[0xd] =  getOpInfo(0, 1, OpArgK, OpArgK, IABC, "ADD", _add);
+opCodes[0x22] =  getOpInfo(1, 0, OpArgN, OpArgU, IABC, "TEST", _test);
+opCodes[0x1e] =  getOpInfo(0, 0, OpArgR, OpArgN, IAsBx, "JMP", _jmp);
+
 
 const LUAI_MAXSTACK = 1000000;
 const LUA_REGISTRYINDEX = -LUAI_MAXSTACK - 1000;
@@ -352,7 +355,7 @@ function _popResults(a, c, ls)
 
 function _getTabUp(inst, ls)
 {
-    //console.log("_getTabUp");
+    console.log("_getTabUp");
     let i = inst.abc();
 
     let a = i.a + 1;
@@ -390,6 +393,7 @@ function _call(inst, ls)
 
 function _return(inst, ls)
 {
+    console.log("_return");
 }
 
 const LUA_OPADD = 0;
@@ -411,6 +415,35 @@ function _add(inst, ls)
 {
     _binaryArith(inst, ls, LUA_OPADD);
 }
+
+function _test(inst, ls)
+{
+    //console.log("_test");
+    let i = inst.abc();
+
+    let a = i.a + 1;
+    let c = i.c;
+
+    if (ls.toBoolean(a) != (c != 0))
+    {
+        ls.addPC(1);
+    }
+}
+
+function _jmp(inst, ls)
+{
+    let i = inst.asbx();
+    let a = i.a;
+    let sbx = i.sbx;
+
+    ls.addPC(sbx);
+    if (a != 0)
+    {
+        throw "jmp error";
+    }
+}
+
+
 
 
 function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name, action)
@@ -439,19 +472,31 @@ function inst(instruction)
 
     function ABC()
     {
-        a = instruction >> 6 & 0xFF;
-        c = instruction >> 14 & 0x1FF;
-        b = instruction >> 23 & 0x1FF;
+        let a = instruction >> 6 & 0xFF;
+        let c = instruction >> 14 & 0x1FF;
+        let b = instruction >> 23 & 0x1FF;
 
         return {a,b,c};
     }
 
     function ABx()
     {
-        a = instruction >> 6 & 0xFF;
-        bx = instruction >> 14;
+        let a = instruction >> 6 & 0xFF;
+        let bx = (instruction >> 14) & 0x3FFFF;
 
         return {a,bx};
+    }
+
+    const MAXARG_Bx = (1<<18) - 1       // 262143
+    const MAXARG_sBx = MAXARG_Bx >> 1 // 131071
+
+    function AsBx()
+    {
+        let i = inst.abx();
+        let a = i.a;
+        //console.log("i.bx ", i.bx, MAXARG_sBx);
+        let sbx = i.bx - MAXARG_sBx;
+        return {a, sbx};
     }
 
     function execute(ls)
@@ -466,6 +511,7 @@ function inst(instruction)
     inst.OpInfo = opCodes[opCode()];
     inst.abc = ABC;
     inst.abx = ABx;
+    inst.asbx = AsBx;
     inst.execute = execute;
 
     return inst;
@@ -732,12 +778,28 @@ function newJsClosure(jsFunction, nUpvals)
     return c;
 }
 
+function convertToBoolean(val)
+{
+    return Boolean(val);
+}
+
 function newLuaState()
 {
     let ls = {};
     ls.registry = newLuaTable(0, 0);
     ls.registry.put(LUA_RIDX_GLOBALS, newLuaTable(0, 0));
     ls.stack = null;
+
+    ls.addPC = function(n)
+    {
+        ls.stack.pc += n;
+    }
+
+    ls.toBoolean = function (idx)
+    {
+        let val = ls.stack.get(idx);
+        return convertToBoolean(val);
+    };
 
     ls.replace = function(idx)
     {
@@ -998,8 +1060,8 @@ function luaMain()
         let ls = newLuaState();//创建state
         ls.register("print", print);//注册print函数
 
-        let a = 3;
-        let b = 4;
+        let a = 0;
+        let b = 0;
 
         ls.pushInteger(a);//入栈一个整数
         ls.setGlobal("a");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"a"
