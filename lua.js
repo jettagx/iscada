@@ -1156,14 +1156,13 @@ function print(ls)
 function setValue(ls)
 {
     console.log("setValue()");
-    //console.log(ls.stack.pop());
-    //console.log(ls.stack.pop());
+
     let val = ls.stack.pop();
     let label = ls.stack.pop();
 
+    console.log("setValue() old:", label.val);
     label.val = val;
-
-    console.log("setValue() update:", label.val);
+    console.log("setValue() new:", label.val);
 }
 
 function luaMain()
@@ -1196,7 +1195,7 @@ function luaMain()
         let labelB = 1;
         let labelC = 1;
 
-        let labelShow = {val:"",type:"label"};
+        let labelShow = {val:"old",type:"label"};
 
         ls.pushInteger(labelA);//入栈一个整数
         ls.setGlobal("labelA");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelA"
@@ -1208,7 +1207,7 @@ function luaMain()
         ls.setGlobal("labelC");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelC"
 
         ls.pushInteger(labelShow);//入栈一个标签
-        ls.setGlobal("labelShow");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelC"
+        ls.setGlobal("labelShow");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelShow"
 
         ls.load(fileData, "any", "bt");
 
