@@ -14,6 +14,8 @@ function newDev()
 
   dev.showThings = [];
 
+  dev.getAllNeedValue = false;
+
   return dev;
 }
 

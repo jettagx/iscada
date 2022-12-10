@@ -358,7 +358,7 @@ function _popResults(a, c, ls)
 
 function _getTabUp(inst, ls)
 {
-    console.log("_getTabUp");
+    //console.log("_getTabUp");
     let i = inst.abc();
 
     let a = i.a + 1;
@@ -396,7 +396,7 @@ function _call(inst, ls)
 
 function _return(inst, ls)
 {
-    console.log("_return");
+    //console.log("_return");
 }
 
 const LUA_OPADD = 0;
@@ -448,7 +448,7 @@ function _jmp(inst, ls)
 
 function _closure(inst, ls)
 {
-    console.log("_closure");
+    //console.log("_closure");
     let i = inst.abx();
 
     let a = i.a + 1;
@@ -460,7 +460,7 @@ function _closure(inst, ls)
 
 function _settabup(inst, ls)
 {
-    console.log("_settabup");
+    //console.log("_settabup");
     let i = inst.abc();
     let a = i.a + 1;
     let b = i.b;
@@ -475,7 +475,7 @@ const LUA_OPEQ = 0;
 
 function _eq(inst, ls)
 {
-    console.log("_eq");
+    //console.log("_eq");
     _compare(inst, ls, LUA_OPEQ);
 }
 
@@ -663,7 +663,7 @@ function newLuaStack(size, state)
         {
             throw "newLuaStack full";
         }
-        console.log("stack push value:", val);
+        //console.log("stack push value:", val);
         t.slots[t.top] = val;
         t.top++;
     }
@@ -680,7 +680,7 @@ function newLuaStack(size, state)
         let val = t.slots[t.top];
         t.slots[t.top] = null;
 
-        console.log("stack pop value :", val);
+        //console.log("stack pop value :", val);
 
         return val;
     }
@@ -1005,7 +1005,7 @@ function newLuaState()
 
         let v = ls.stack.pop();//弹出函数
 
-        console.log("set global :", name, v);
+        //console.log("set global :", name, v);
         ls.setTable(t, name, v, false);//设置全局表
     };
 
@@ -1155,14 +1155,51 @@ function print(ls)
 
 function setValue(ls)
 {
-    console.log("setValue()");
+    //console.log("setValue()");
 
     let val = ls.stack.pop();
-    let label = ls.stack.pop();
+    let button = ls.stack.pop();
 
-    console.log("setValue() old:", label.val);
-    label.val = val;
-    console.log("setValue() new:", label.val);
+    button.value[0] = val;
+
+    //如果是button类型，调用发送通信请求
+    if (button.type == "button")
+    {
+      //调用设备通信函数，进行通信
+      devWriteCommu(button, (data)=>{
+        let tmp;
+        if (tmp = jsonParse(data))
+        {
+            if(tmp.result == "ok")
+            {
+                console.log("脚本" + "成功");
+            }
+        }
+      });
+    }
+
+    return 0;
+}
+
+let ls;
+let fileData_;
+
+//sysctl中收集到所有需要的变量的值了，会调用这个函数运行脚本
+//暂时支持一台设备
+function runLua(showThings)
+{
+    for (let i = 0; i < showThings.length; i++)
+    {
+        let showThing = showThings[i];
+
+        //取出showThing的name和值，设置全局变量
+        ls.pushInteger(Number(showThing.value));//入栈一个整数
+        ls.setGlobal(showThing.name);//将栈顶的数据出栈到lua全局变量区  
+    }
+
+    ls.load(fileData_, "any", "bt");
+
+    ls.call(0, 0);
 }
 
 function luaMain()
@@ -1177,7 +1214,8 @@ function luaMain()
         //     list(proto);
         // }
 
-        let ls = newLuaState();//创建state
+        ls = newLuaState();//创建state
+        fileData_ = fileData;
         //ls.register("print", print);//注册print函数
 
         // let a = 1;
@@ -1189,29 +1227,18 @@ function luaMain()
         // ls.pushInteger(b);//入栈一个整数
         // ls.setGlobal("b");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"b"
 
-        ls.register("setValue", setValue);//注册print函数
+        ////////////////////////////////////////////////////////////
+        ls.register("setValue", setValue);//注册setValue函数
 
-        let labelA = 1;
-        let labelB = 1;
-        let labelC = 1;
+        let button = '{"type":"button","name":"buttonAlarm","device_id":[1],"variable":[4],"value":[0],"x":120,"y":0}';
 
-        let labelShow = {val:"old",type:"label"};
+        let buttonAlarm = jsonParse(button);
 
-        ls.pushInteger(labelA);//入栈一个整数
-        ls.setGlobal("labelA");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelA"
+        //console.log(buttonAlarm);
 
-        ls.pushInteger(labelB);//入栈一个整数
-        ls.setGlobal("labelB");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelB"
-
-        ls.pushInteger(labelC);//入栈一个整数
-        ls.setGlobal("labelC");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelC"
-
-        ls.pushInteger(labelShow);//入栈一个标签
-        ls.setGlobal("labelShow");  //将栈顶的数据出栈到lua全局变量区，并且赋给一个变量名"labelShow"
-
-        ls.load(fileData, "any", "bt");
-
-        ls.call(0, 0);
+        ls.pushInteger(buttonAlarm);//入栈一个整数
+        ls.setGlobal("buttonAlarm");
+        
     });
     
 }

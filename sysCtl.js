@@ -84,16 +84,24 @@ function sysCtl(info)
                 if(tmp = jsonParse(data))
                 {
                     //再去读下一个数据，直到读到所有数据，再重头读
+                    let upDateIndex = index;
                     index++;
                     if (index == dev.showThings.length)
                     {
+                        //收集值用于脚本运行
+                        dev.getAllNeedValue = true;
                         index = 0;
                     }
     
                     //更新标签
-                    let showThing = dev.showThings[index];
+                    let showThing = dev.showThings[upDateIndex];
                     showThing.value = tmp.result;
                     updateGui();//更新渲染标签
+
+                    if (dev.getAllNeedValue)
+                    {
+                        getValue(dev.showThings);
+                    }
     
                     devStartCommu(dev.showThings[index],cb);
                 }
@@ -136,12 +144,17 @@ let prjFile_ = '\
     \
     "button":[\
     {"name":"button_on","device_id":[1],"variable":[1],"value":[1],"x":120,"y":0},\
-    {"name":"button_off","device_id":[1],"variable":[1],"value":[0],"x":287,"y":16},\
-    {"name":"button_on2","device_id":[2],"variable":[2],"value":[1],"x":120,"y":160},\
-    {"name":"button_off2","device_id":[2],"variable":[2],"value":[0],"x":287,"y":160}],\
+    {"name":"button_off","device_id":[1],"variable":[1],"value":[0],"x":287,"y":0},\
+    {"name":"button_on2","device_id":[1],"variable":[2],"value":[1],"x":120,"y":160},\
+    {"name":"button_off2","device_id":[1],"variable":[2],"value":[0],"x":287,"y":160},\
+    {"name":"button_on3","device_id":[1],"variable":[3],"value":[1],"x":120,"y":330},\
+    {"name":"button_off3","device_id":[1],"variable":[3],"value":[0],"x":287,"y":330}],\
     \
     "label":[\
-    {"name":"led1","device_id":[1],"variable":[1],"x":201,"y":127}]\
+    {"name":"labelA","device_id":[1],"variable":[1],"x":201,"y":127},\
+    {"name":"labelB","device_id":[1],"variable":[2],"x":201,"y":300},\
+    {"name":"labelC","device_id":[1],"variable":[3],"x":201,"y":450},\
+    {"name":"labelAlarm","device_id":[1],"variable":[4],"x":201,"y":500}]\
     }\
 }';
 
