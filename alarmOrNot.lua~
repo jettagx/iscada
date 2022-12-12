@@ -1,10 +1,10 @@
-function okOrNot()
-    if(labelA + labelB + labelC == 3)
+function alarmOrNot()
+    if(labelA + labelB + labelC == 30)
     then
-        setValue(labelShow, "ok")
+        setValue(buttonAlarm, 1)
     else
-        setValue(labelShow, "error")
+        setValue(buttonAlarm, 0)
     end  
 end
 
-okOrNot()
+alarmOrNot()

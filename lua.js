@@ -1202,6 +1202,194 @@ function runLua(showThings)
     ls.call(0, 0);
 }
 
+
+///////////////////////////////////////////////////////////////////////////
+//词法分析
+const TOKEN_EOF = 0;//结束符
+const TOKEN_KW_FUNCTION = 1;//function
+const TOKEN_IDENTIFIER = 2;//标识符
+const TOKEN_SEP_LPAREN = 3;//(
+const TOKEN_SEP_RPAREN = 4;//)
+const TOKEN_KW_IF = 5;//if
+const TOKEN_OP_ADD = 6;//+
+const TOKEN_OP_EQ = 7;//==
+const TOKEN_NUMBER = 8;//数字
+const TOKEN_KW_THEN = 9;//then
+const TOKEN_SEP_COMMA = 10;//,
+const TOKEN_KW_ELSE = 11;//else
+const TOKEN_KW_END = 12;//end
+
+let keywords = new Map();
+keywords.set("function", TOKEN_KW_FUNCTION);
+keywords.set("if", TOKEN_KW_IF);
+keywords.set("then", TOKEN_KW_THEN);
+keywords.set("else", TOKEN_KW_ELSE);
+keywords.set("end", TOKEN_KW_END);
+
+function newLexer(chunk, chunkName)
+{
+    let i = {};
+    let count = 0;
+    let line = 1;
+
+    i.chunk = chunk;
+    i.chunkName = chunkName;
+    i.line = line;//从第一行开始
+    i.count = count;//指向chunk字符的指针
+
+    //跳过空白字符，如空格和换行符
+    i.skipWhiteSpaces = function ()
+    {
+        while(1)
+        {
+            if (chunk[count] == ' ')
+            {
+                i.next(1);
+            }
+            else if (chunk[count] == '\r' && chunk[count + 1] == '\n')
+            {
+                i.next(2);
+                line++;
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+
+    i.next = function(n)
+    {
+        count += n;
+    }
+
+    i.isDigit = function(n)
+    {
+        return n >= '0' && n <= '9';
+    }
+
+    i.scanNumber = function(n)
+    {
+        //只支持整数
+        let num;
+        let countStart = count;
+
+        while(chunk[count] >= '0' && chunk[count] <= '9')
+        {
+            i.next(1);
+        }
+
+        num = chunk.substring(countStart, count);
+
+        return num;
+    }
+
+    i.isLetter = function(n)
+    {
+        return (n >= 'a' && n <= 'z') || (n >= 'A' && n <= 'Z');
+    }
+
+    i.scanIdentifier = function()
+    {
+        //返回扫描得到的标识符
+        //只支持字母表示的标识符
+        let identifier;
+        let countStart = count;
+
+        while((chunk[count] >= 'a' && chunk[count] <= 'z') || 
+        (chunk[count] >= 'A' && chunk[count] <= 'Z'))
+        {
+            i.next(1);
+        }
+
+        identifier = chunk.substring(countStart, count);
+
+        return identifier;
+    }
+
+    //返回行号，token类型，token
+    i.nextToken = function ()
+    {
+        i.skipWhiteSpaces();
+
+        //到达最后字符了，直接返回
+        if (count == chunk.length)
+        {
+            return {line, kind:TOKEN_EOF, token:"EOF"};
+        }
+
+        switch (chunk[count]) {
+            case '(':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_LPAREN, token:"("};
+            break;
+
+            case ')':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_RPAREN, token:")"};
+            break;
+
+            case '+':
+                i.next(1);
+                return {line, kind:TOKEN_OP_ADD, token:"+"};
+            break;
+
+            case '=':
+                if ((count + 1 != chunk.length) && (chunk[count + 1] == '=')) 
+                {
+                    i.next(2);
+                    return {line, kind:TOKEN_OP_EQ, token:"=="};
+                } 
+                else 
+                {
+                    i.next(1);
+                    return {line, kind:TOKEN_OP_ASSIGN, token:"="};
+                }
+
+            break;
+
+            case ',':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_COMMA, token:","};
+            break;
+        
+            default:
+                break;
+        }
+
+        //判断是否是数字
+        let c = i.chunk[count];
+
+        if (i.isDigit(c))
+        {
+            let token = i.scanNumber();
+
+            return {line, kind:TOKEN_NUMBER, token:token};
+        }
+
+        //判断是否是标识符或关键字
+        if (i.isLetter(c))
+        {
+            let token = i.scanIdentifier();
+            //console.log("keywords[token]", keywords.get(token), token);
+
+            if (keywords.get(token))
+            {
+                return {line, kind:keywords.get(token), token:token};
+            }
+            else
+            {
+                return {line, kind:TOKEN_IDENTIFIER, token:token};
+            }
+        }
+
+        throw "unexpected symbol near" + c;
+    };
+
+    return i;
+}
+///////////////////////////////////////////////////////////////////////////
+
 function luaMain()
 {
     let file = lua.readfile("luac.out");
@@ -1244,3 +1432,31 @@ function luaMain()
 }
 
 luaMain();
+
+function lexerTokens()
+{
+    let file = lua.readfile("alarmOrNot.lua");
+
+    function ab2str(buf) {
+        return String.fromCharCode.apply(null, new Uint16Array(buf));
+    }
+
+    file.then(fileData =>{
+        let str = ab2str(fileData);
+
+        let lexer = newLexer(str, "alarmOrNot.lua");
+
+        while(1)
+        {
+            let i = lexer.nextToken();
+            console.log("%d ",i.line, i.kind, i.token);
+
+            if (i.kind == TOKEN_EOF)
+            {   
+                break;
+            }
+        }
+    })
+}
+
+lexerTokens();

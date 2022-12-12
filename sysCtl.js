@@ -100,7 +100,7 @@ function sysCtl(info)
 
                     if (dev.getAllNeedValue)
                     {
-                        getValue(dev.showThings);
+                        runLua(dev.showThings);
                     }
     
                     devStartCommu(dev.showThings[index],cb);
