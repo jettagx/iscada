@@ -1,5 +1,5 @@
 function alarmOrNot()
-    if(labelA + labelB + labelC == 30)
+    if(labelA + labelB + labelC == 3)
     then
         setValue(buttonAlarm, 1)
     else
@@ -8,3 +8,4 @@ function alarmOrNot()
 end
 
 alarmOrNot()
+

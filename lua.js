@@ -1218,6 +1218,7 @@ const TOKEN_KW_THEN = 9;//then
 const TOKEN_SEP_COMMA = 10;//,
 const TOKEN_KW_ELSE = 11;//else
 const TOKEN_KW_END = 12;//end
+const TOKEN_KW_RETURN = 13;//return
 
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
@@ -1236,6 +1237,46 @@ function newLexer(chunk, chunkName)
     i.chunkName = chunkName;
     i.line = line;//从第一行开始
     i.count = count;//指向chunk字符的指针
+
+    i.nextTokenLine = 0;
+    i.nextTokenKind = 0;
+    i.nextToken_ = "";
+
+    i.nextIdentifier = function()
+    {
+        return i.nextTokenOfKind(TOKEN_IDENTIFIER);
+    }
+
+    i.nextTokenOfKind = function(kind)
+    {
+        let token = i.nextToken();
+
+        if (token.kind != kind)
+        {
+            throw "syntax error near " + token.kind + ' ' + kind;
+        }
+
+        return {line:token.line, token:token.token};
+    }
+
+    i.lookAhead = function()
+    {
+        //只查看，不改变line的值
+        if (i.nextTokenLine > 0)
+        {   
+            return i.nextTokenKind;
+        }
+
+        let currentLine = i.line;
+        let token = i.nextToken();
+
+        i.line = currentLine;
+        i.nextTokenLine = token.line;
+        i.nextTokenKind = token.kind;
+        i.nextToken_ = token.token;
+
+        return token.kind;
+    }
 
     //跳过空白字符，如空格和换行符
     i.skipWhiteSpaces = function ()
@@ -1310,6 +1351,18 @@ function newLexer(chunk, chunkName)
     //返回行号，token类型，token
     i.nextToken = function ()
     {
+        if (i.nextTokenLine > 0)
+        {
+            let line = i.nextTokenLine;
+            let kind = i.nextTokenKind;
+            let token = i.nextToken_;
+
+            i.line = i.nextTokenLine;
+            i.nextTokenLine = 0;
+            //console.log(4444);
+            return {line, kind, token};
+        }
+
         i.skipWhiteSpaces();
 
         //到达最后字符了，直接返回
@@ -1388,6 +1441,399 @@ function newLexer(chunk, chunkName)
 
     return i;
 }
+/////////////////////////////////
+//语法分析
+
+function newBlock(stats, retExps, lastLine)
+{
+    let i = {};
+    
+    i.stats = stats;
+    i.retExps = retExps;
+    i.lastLine = lastLine;
+
+    return i;
+}
+
+function newIfStat(exps, blocks)
+{
+    let i = {};
+
+    i.exps = exps;
+    i.blocks = blocks;
+
+    i.type = "IfStat";//for代码生成
+
+    return i;
+}
+
+
+function binOpExp(line, op, exp1, exp2)
+{
+    let i = {};
+
+    i.line = line;
+    i.op = op;
+    i.exp1 = exp1;
+    i.exp2 = exp2;
+
+    i.type = "BinopExp";
+
+    return i;
+}
+
+//解析block
+function parseBlock(lexer)
+{
+    return newBlock(parseStats(lexer),
+                    parseRetExps(lexer),
+                    lexer.line);
+}
+
+function isBlockEnd(tokenKind)
+{
+    console.log("tokenKind:" + tokenKind);
+    switch (tokenKind) {
+        case TOKEN_EOF:
+        case TOKEN_KW_END:
+        case TOKEN_KW_ELSE:
+            return true;
+            break;
+    
+        default:
+            break;
+    }
+
+    return false;
+}
+
+function trueExp(line)
+{
+    let i = {};
+
+    i.line = line;
+
+    i.type = "TrueExp";
+
+    return i;
+}
+
+function integerExp(line, val)
+{
+    let i = {};
+
+    i.line = line;
+    i.val = val;
+
+    i.type = "IntegerExp";
+
+    return i;
+}
+
+function FloatExp(line, val)
+{
+    let i = {};
+    
+    i.line = line;
+    i.val = val;
+
+    i.type = "FloatExp";
+
+    return i;
+}
+
+function parseNumberExp(lexer)
+{
+    function isInt(n) 
+    {
+        return typeof n === 'number' && n % 1 == 0;
+    }
+
+    let i = lexer.nextToken();
+    let line = i.line;
+    let token = i.token;
+
+    let number = Number(token);
+
+    if (isInt(number))
+    {
+        //是整数
+        return integerExp(line, number);
+    }
+    else
+    {
+        //是浮点数
+        return FloatExp(line, number);
+    }
+}
+
+function primary(lexer) 
+{
+    //只支持标识符和数字
+    switch (lexer.lookAhead()) {
+        case TOKEN_NUMBER:
+            return parseNumberExp(lexer);//数字
+            break;
+
+        default:
+            break;
+    }
+
+    return parsePrefixExp(lexer);//标识符
+}
+
+function factor(lexer) 
+{
+    let expr = primary(lexer);
+
+    while (1) 
+    {
+        switch (lexer.lookAhead()) 
+        {
+            case TOKEN_OP_ADD:
+                let i = lexer.nextToken();
+                let line = i.line;
+                let op = i.kind;
+
+                expr = binOpExp(line, op, expr, primary(lexer));
+                break;
+        
+            default:
+                return expr;
+        }
+    }
+
+    return expr;
+}
+
+function term(lexer) 
+{
+    let expr = factor(lexer);
+
+    while (1) 
+    {
+        switch (lexer.lookAhead()) 
+        {
+            case TOKEN_OP_EQ:
+                let i = lexer.nextToken();
+                let line = i.line;
+                let op = i.kind;
+
+                expr = binOpExp(line, op, expr, factor(lexer));
+                break;
+        
+            default:
+                return expr;
+        }
+    }
+
+    return expr;
+}
+
+//解析表达式
+//暂时只支持加法
+function parseExp(lexer)
+{
+    return term(lexer);
+}
+
+//解析if语句
+function parseIfstat(lexer)
+{
+    lexer.nextTokenOfKind(TOKEN_KW_IF);//确定开头是IF
+
+    let exps = [];
+    let blocks = [];
+
+    exps.push(parseExp(lexer));
+    
+    //console.log("if cond:", exps[0]);
+
+    lexer.nextTokenOfKind(TOKEN_KW_THEN);//确定表达式之后是THEN
+    
+    blocks.push(parseBlock(lexer));//解析满足if条件的语句
+    //console.log("333", blocks);
+
+    //处理else，我们先不支持elseif
+    if (lexer.lookAhead() == TOKEN_KW_ELSE)
+    {
+        //console.log(3);
+        lexer.nextToken();//跳过else
+
+        exps.push(trueExp(lexer.line));//插入true表达式
+
+        blocks.push(parseBlock(lexer));//解析满足else条件的语句
+        //console.log(4);
+    }
+
+    lexer.nextTokenOfKind(TOKEN_KW_END);//确定以end结尾
+
+    return newIfStat(exps, blocks);
+}
+
+function nameExp(line, name)
+{
+    let i = {};
+    i.line = line;
+    i.name = name;
+
+    i.type = "NameExp";
+
+    return i;
+}
+
+function funcCallExp(line, lastLine, prefixExp, args)
+{
+    let i = {};
+
+    i.line = line;
+    i.lastLine = lastLine;
+    i.prefixExp = prefixExp;
+    i.args = args;
+
+    i.type = "FuncCallExp";
+
+    return i;
+}
+
+function parseExpList(lexer)
+{
+    let exps = [];
+
+    exps.push(parseExp(lexer));
+
+    while(lexer.lookAhead() == TOKEN_SEP_COMMA)//如果是逗号分隔
+    {
+        lexer.nextToken()//跳过逗号
+        exps.push(parseExp(lexer));
+    }
+
+    return exps;
+}
+
+//解析函数参数
+function _parseArgs(lexer)
+{
+    let args;
+
+    switch (lexer.lookAhead()) {
+        case TOKEN_SEP_LPAREN:
+            lexer.nextToken();//跳过(
+
+            if (lexer.lookAhead() != TOKEN_SEP_RPAREN)
+            {
+                //说明有参数
+                args = parseExpList(lexer);
+            }
+
+            lexer.nextTokenOfKind(TOKEN_SEP_RPAREN);//必须以)结束
+            break;
+    
+        default:
+            break;
+    }
+
+    return args;
+}
+
+function _finishFuncCallExp(lexer, prefixExp)
+{
+    let line = lexer.line;
+
+    let args = _parseArgs(lexer);
+
+    let lastLine = lexer.line;
+
+    return funcCallExp(line, lastLine, prefixExp, args);
+}
+
+function _finishPrefixExp(lexer, exp)
+{
+    switch (lexer.lookAhead()) {
+        case TOKEN_SEP_LPAREN:
+            exp = _finishFuncCallExp(lexer, exp);
+            break;
+    
+        default:
+            break;
+    }
+
+    return exp;
+}
+
+function parseParensExp(lexer)
+{
+    //console.log(1);
+    lexer.nextTokenOfKind(TOKEN_SEP_LPAREN);
+    //console.log(2);
+
+    let exp = parseExp(lexer);
+
+    lexer.nextTokenOfKind(TOKEN_SEP_RPAREN);
+
+    return exp;
+}
+
+function parsePrefixExp(lexer)
+{
+    let exp;
+
+    if (lexer.lookAhead() == TOKEN_IDENTIFIER)
+    {
+        let i = lexer.nextIdentifier();
+        exp = nameExp(i.line, i.token);
+    }
+    else
+    {
+        exp = parseParensExp(lexer);//( )
+    }
+
+    return _finishPrefixExp(lexer, exp);
+}
+
+//函数调用
+function parseAssignOrFuncCallStat(lexer)
+{
+    //暂时只支持函数调用
+    let prefixExp = parsePrefixExp(lexer);
+
+    return prefixExp;
+}
+
+//解析语句
+function parseStat(lexer)
+{
+    switch (lexer.lookAhead()) 
+    {
+        case TOKEN_KW_IF:
+            return parseIfstat(lexer);
+            break;
+    
+        default:
+		return parseAssignOrFuncCallStat(lexer);
+    }
+}
+
+//解析语句
+function parseStats(lexer)
+{
+    let stats = [];
+    while(!isBlockEnd(lexer.lookAhead()))
+    {
+        stats.push(parseStat(lexer));
+    }
+    //console.log(stats);
+    return stats;
+}
+
+//解析返回语句，我们暂时不支持返回语句
+function parseRetExps(lexer)
+{
+    if (lexer.lookAhead() != TOKEN_KW_RETURN)
+    {
+        return null;
+    }
+}
 ///////////////////////////////////////////////////////////////////////////
 
 function luaMain()
@@ -1431,11 +1877,19 @@ function luaMain()
     
 }
 
-luaMain();
+//luaMain();
+
+function parse(lexer)
+{
+    let ast = parseBlock(lexer);
+
+    //console.log(Obj2json({i:1,b:2}));
+    console.log("ast", ast);
+}
 
 function lexerTokens()
 {
-    let file = lua.readfile("alarmOrNot.lua");
+    let file = lua.readfile("alarmOrNot-onlyif.lua");
 
     function ab2str(buf) {
         return String.fromCharCode.apply(null, new Uint16Array(buf));
@@ -1444,18 +1898,21 @@ function lexerTokens()
     file.then(fileData =>{
         let str = ab2str(fileData);
 
-        let lexer = newLexer(str, "alarmOrNot.lua");
+        let lexer = newLexer(str, "alarmOrNot-onlyif.lua");
 
-        while(1)
-        {
-            let i = lexer.nextToken();
-            console.log("%d ",i.line, i.kind, i.token);
+        
+        parse(lexer);
 
-            if (i.kind == TOKEN_EOF)
-            {   
-                break;
-            }
-        }
+        // while(1)
+        // {
+        //     let i = lexer.nextToken();
+        //     console.log("%d ",i.line, i.kind, i.token);
+
+        //     if (i.kind == TOKEN_EOF)
+        //     {   
+        //         break;
+        //     }
+        // }
     })
 }
 
