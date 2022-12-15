@@ -299,16 +299,32 @@ const IAx = 3;
 
 let opCodes = [];
 
-opCodes[0x6]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
-opCodes[0x1]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
-opCodes[0x24] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL", _call);
-opCodes[0x26] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
-opCodes[0xd] =  getOpInfo(0, 1, OpArgK, OpArgK, IABC, "ADD", _add);
-opCodes[0x22] =  getOpInfo(1, 0, OpArgN, OpArgU, IABC, "TEST", _test);
-opCodes[0x1e] =  getOpInfo(0, 0, OpArgR, OpArgN, IAsBx, "JMP", _jmp);
-opCodes[0x2c] =  getOpInfo(0, 1, OpArgU, OpArgN, IABx, "CLOSURE", _closure);
-opCodes[0x08] =  getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABUP", _settabup);
-opCodes[0x1f] =  getOpInfo(1, 0, OpArgK, OpArgK, IABC, "EQ", _eq);
+const OP_GETTABUP = 0x6;
+const OP_LOADK = 0x1;
+const OP_CALL = 0x24;
+const OP_RETURN = 0x26;
+const OP_ADD = 0xd;
+const OP_TEST = 0x22;
+const OP_JMP = 0x1e;
+const OP_CLOSURE = 0x2c;
+const OP_SETTABUP = 0x08;
+const OP_EQ = 0x1f;
+
+const OP_LOADBOOL = 0x3;
+
+
+opCodes[OP_GETTABUP]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
+opCodes[OP_LOADK]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
+opCodes[OP_CALL] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL", _call);
+opCodes[OP_RETURN] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
+opCodes[OP_ADD] =  getOpInfo(0, 1, OpArgK, OpArgK, IABC, "ADD", _add);
+opCodes[OP_TEST] =  getOpInfo(1, 0, OpArgN, OpArgU, IABC, "TEST", _test);
+opCodes[OP_JMP] =  getOpInfo(0, 0, OpArgR, OpArgN, IAsBx, "JMP", _jmp);
+opCodes[OP_CLOSURE] =  getOpInfo(0, 1, OpArgU, OpArgN, IABx, "CLOSURE", _closure);
+opCodes[OP_SETTABUP] =  getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABUP", _settabup);
+opCodes[OP_EQ] =  getOpInfo(1, 0, OpArgK, OpArgK, IABC, "EQ", _eq);
+
+opCodes[OP_LOADBOOL] =  getOpInfo(1, 0, OpArgU, OpArgU, IABC, "LOADBOOL", _loadBool);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -479,6 +495,11 @@ function _eq(inst, ls)
     _compare(inst, ls, LUA_OPEQ);
 }
 
+function _loadBool(inst, ls)
+{
+
+}
+
 function _compare(inst, ls, op)
 {
     let i = inst.abc();
@@ -511,6 +532,8 @@ function getOpInfo(testFlag, setAFlag, argBMode, argCMode, opMode, name, action)
 
     return i;
 }
+const MAXARG_Bx = (1<<18) - 1       // 262143
+const MAXARG_sBx = MAXARG_Bx >> 1 // 131071
 
 // 参数是4字节的指令
 function inst(instruction)
@@ -539,8 +562,7 @@ function inst(instruction)
         return {a,bx};
     }
 
-    const MAXARG_Bx = (1<<18) - 1       // 262143
-    const MAXARG_sBx = MAXARG_Bx >> 1 // 131071
+    
 
     function AsBx()
     {
@@ -572,7 +594,8 @@ function inst(instruction)
 function printOperands(inst)
 {
     let OpInfo = inst.OpInfo;
-
+    let out = "";
+    out += inst.OpInfo.name + " ";
     switch (OpInfo.opMode) {
         case IABC:
             
@@ -581,31 +604,39 @@ function printOperands(inst)
             let b = val.b;
             let c = val.c;
 
-            console.log(a);
+            out += a;
+            
 
             if (OpInfo.argBMode != OpArgN)
             {
                 if (b > 0xff)
                 {
-                    console.log(" %d", -1-(b&0xff));
+                    //console.log(" %d", -1-(b&0xff));
+                    out += (" " + (-1-(b&0xff)));
                 }
                 else
                 {
-                    console.log(" %d", b);
+                    //console.log(" %d", b);
+                    out += (" " + b);
                 }
+
+                //console.log(out);
             }
 
             if (OpInfo.argCMode != OpArgN)
             {
                 if (c > 0xff)
                 {
-                    console.log(" %d", -1-(c&0xff));
+                    //console.log(" %d", -1-(c&0xff));
+                    out += (" " + (-1-(c&0xff)));
                 }
                 else
                 {
-                    console.log(" %d", c);
+                    //console.log(" %d", c);
+                    out += (" " + c);
                 }
             }
+            console.log(out);
             break;
 
         case IABx:
@@ -613,17 +644,28 @@ function printOperands(inst)
             let a_ = val_.a;
             let bx = val_.bx;
 
-            console.log(a_);
+            out += a_;
+            //console.log(a_);
 
             if (OpInfo.argBMode == OpArgK)
             {
-                console.log(" %d", -1-bx);
+                //console.log(" %d", -1-bx);
+                out += (" " + (-1-bx));
             }
             else if (OpInfo.argBMode == OpArgU)
             {
-                console.log(" %d", bx);
+                //console.log(" %d", bx);
+                out += (" " + bx);
             }
-        
+            console.log(out);
+            break;
+
+        case IAsBx:
+            let va = inst.asbx();
+            let aa = va.a;
+            let sbx = va.sbx;
+
+            console.log(out + aa + " " + sbx);
             break;
     
         default:
@@ -1834,6 +1876,388 @@ function parseRetExps(lexer)
         return null;
     }
 }
+
+
+//////////////////////////
+//代码生成
+
+//辅助代码生成
+function newFuncInfo()
+{
+    let i = {};
+    i.usedRegs = 0;//初始寄存器
+    i.insts = [];//存储指令的数组
+
+    //寄存器分配
+    i.allocReg = function ()
+    {
+        i.usedRegs++;
+
+        if (i.usedRegs >= 255)
+        {
+            throw "too many registers";
+        }
+
+        if (i.usedRegs > i.maxRegs)
+        {
+            i.maxRegs = i.usedRegs;
+        }
+
+        return i.usedRegs - 1;
+    }
+
+    //释放一个寄存器
+    i.freeReg = function()
+    {
+        i.usedRegs--;
+    }
+
+    //寄存器释放
+    i.freeRegs = function(n)
+    {
+        for (let j = 0; j < n; j++)
+        {
+            i.freeReg();
+        }
+    }
+    
+    //常量表
+    i.constants = new Map();
+
+    //k为map的key，代表常量名
+    i.indexOfConstant = function(k)
+    {
+        //如果常量名存在，返回常量索引
+        let idx;
+        if (idx = i.constants.get(k))
+        {
+            return idx;
+        }
+
+        //如果键不存在，创建键值对
+        idx = i.constants.size;
+
+        i.constants.set(k, idx);
+
+        return idx;
+    }
+
+    //最终生成指令的函数
+    i.emitABC = function(opcode, a, b, c)
+    {
+        let inst_ = b << 23 | c << 14 | a << 6 | opcode;
+        i.insts.push(inst_);
+    }
+
+    i.emitABx = function(opcode, a, bx)
+    {
+        let inst_ = bx << 14 | a << 6 | opcode;
+        i.insts.push(inst_);
+    }
+
+    i.emitAsBx = function(opcode, a, b)
+    {
+        let inst_ = (b + MAXARG_sBx) << 14 | a << 6 | opcode;
+        i.insts.push(inst_);
+    }
+
+    i.emitAx = function(opcode, ax)
+    {
+        let inst_ = ax << 6 | opcode;
+        i.insts.push(inst_);
+    }
+
+    //返回当前指令地址
+    i.pc = function()
+    {
+        return i.insts.length - 1;
+    }
+
+    //修复jmp指令,跳转地址
+    i.fixSbx = function(pc, sBx)
+    {
+        let inst_ = i.insts[pc];
+        //console.log("old");
+        //printOperands(inst(inst_));
+        inst_ = inst_ & 0x3fff;
+        inst_ = inst_ | ((sBx + MAXARG_sBx) << 14);
+        //console.log("new jmp:");
+        //printOperands(inst(inst_));
+        i.insts[pc] = inst_;
+    }
+
+    //剩下的函数
+    i.emitGetTabUp = function(a, b, varName)
+    {
+        let idx = i.indexOfConstant(varName);
+
+        idx = idx | 0x100;
+
+        i.emitABC(OP_GETTABUP, a, b, idx);
+    }
+
+    i.emitJmp = function(a, sBx)
+    {
+        i.emitAsBx(OP_JMP, a, sBx);
+        return i.insts.length - 1;
+    }
+
+    i.emitLoadBool = function(a, b, c)
+    {
+        i.emitABC(OP_LOADBOOL, a, b, c);
+    }
+    
+
+    i.emitBinaryOp = function(op, a, b, c)
+    {
+        //只支持加法和等于判断
+        if (op == TOKEN_OP_ADD)
+        {
+            i.emitABC(OP_ADD, a, b, c);
+        }
+        else if (op == TOKEN_OP_EQ)
+        {
+            i.emitABC(OP_EQ, 1, b, c);
+
+            i.emitJmp(0, 1);
+            i.emitLoadBool(a, 0, 1);
+            i.emitLoadBool(a, 1, 0);
+        }
+    }
+
+    i.emitLoadK = function(a, k)
+    {
+        let idx = i.indexOfConstant(k);
+
+        if (idx < (1 << 18)) 
+        {
+            i.emitABx(OP_LOADK, a, idx)
+        } 
+        else 
+        {
+            throw "emitLoadK error";
+        }
+    }
+
+    i.emitTest = function(a, c)
+    {
+        i.emitABC(OP_TEST, a, 0, c);
+    }
+
+    i.emitCall = function(a, nArgs, nRet)
+    {
+        i.emitABC(OP_CALL, a, nArgs+1, nRet+1);
+    }
+
+    return i;
+}
+
+function cgRetStat(fi, retExps)
+{
+    throw "cgRetStat error";
+}
+
+function cgBinopExp(fi, node, a)
+{
+    switch (node.op) 
+    {
+        default:
+            let b = fi.allocReg();
+            cgExp(fi, node.exp1, b, 1);
+
+            let c = fi.allocReg();
+            cgExp(fi, node.exp2, c, 1);
+
+            fi.emitBinaryOp(node.op, a, b, c);
+
+            fi.freeRegs(2);
+            break;
+    }
+}
+
+function tableAccessExp(lastLine, prefixExp, keyExp)
+{
+    let i = {};
+
+    i.lastLine = lastLine;
+    i.prefixExp = prefixExp;
+    i.keyExp = keyExp;
+
+    i.type = "TableAccessExp";
+
+    return i;
+}
+
+function StringExp(line, str)
+{
+    let i = {};
+
+    i.line = line;
+    i.str = str;
+
+    i.type = "StringExp";
+
+    return i;
+}
+
+function cgNameExp(fi, node, a)
+{
+    //只支持全局变量 GETTABUP
+    fi.emitGetTabUp(a, 0, node.name);
+}
+
+function prepFuncCall(fi, node, a)
+{
+    let nArgs = node.args.length;
+
+    cgExp(fi, node.prefixExp, a, 1);//加载函数
+
+    for (let i = 0; i < nArgs; i++)
+    {
+        let arg = node.args[i];
+
+        let tmp = fi.allocReg();
+
+        cgExp(fi, arg, tmp, 1);//加载函数参数，1代表1个返回值
+    }
+
+    fi.freeRegs(nArgs);
+
+    return nArgs;
+}
+
+function cgFuncCallExp(fi, node, a, n)
+{
+    let nArgs = prepFuncCall(fi, node, a);
+    fi.emitCall(a, nArgs, n);//生成call指令
+}
+
+//解析表达式
+function cgExp(fi, exp, a, n)
+{
+    switch (exp.type) {
+        case "IntegerExp":
+            fi.emitLoadK(a, exp.val);
+            break;
+
+        case "FloatExp":
+            fi.emitLoadK(a, exp.val);
+            break;
+
+        case "TrueExp":
+            fi.emitLoadBool(a, 1, 0);
+            break;
+
+        case "BinopExp":
+            cgBinopExp(fi, exp, a);
+            break;
+
+        case "NameExp":
+            cgNameExp(fi, exp, a);
+            break;
+
+        case "FuncCallExp":
+            cgFuncCallExp(fi, exp, a, n);
+            break;
+
+        case "StringExp":
+            fi.emitLoadK(a, exp.str);
+        break;
+
+        //case "TableAccessExp":
+        //    cgTableAccessExp(fi, exp, a);
+        //break;
+
+        default:
+            break;
+    }
+}
+
+function cgIfStat(fi, node)
+{
+    let pcJmpToEnd = new Array(node.exps.length);//跳转到if语句结束处
+    let pcJmpToNextExp = -1;
+
+    for (let i = 0; i < node.exps.length; i++)
+    {
+        let exp = node.exps[i];
+
+        if (pcJmpToNextExp >= 0)
+        {
+            //console.log("fixSbx", pcJmpToNextExp ,fi.pc() - pcJmpToNextExp);
+            fi.fixSbx(pcJmpToNextExp, fi.pc() - pcJmpToNextExp);
+        }
+
+        let r = fi.allocReg();//分配lua寄存器
+
+        cgExp(fi, exp, r, 1);//生成表达式相关语句
+
+        fi.freeReg()//回收寄存器
+
+        fi.emitTest(r, 0);//生成测试语句，测试表达式是否为真
+
+        pcJmpToNextExp = fi.emitJmp(0, 0);//生成jmp语句
+
+        //fi.enterScope(false);
+        cgBlock(fi, node.blocks[i]);
+        //fi.exitScope();
+
+        if (i < node.exps.length - 1)
+        {
+            pcJmpToEnd[i] = fi.emitJmp(0, 0)//执行完block语句后跳转到if语句结束处
+        }
+        else
+        {
+            pcJmpToEnd[i] = pcJmpToNextExp;
+        }
+    }
+
+    for (let i = 0; i < pcJmpToEnd.length; i++)
+    {
+        let pc = pcJmpToEnd[i];
+
+        fi.fixSbx(pc, fi.pc() - pc);
+    }
+}
+
+//生成函数调用指令
+function cgFuncCallStat(fi, node)
+{
+    let r = fi.allocReg();
+    cgFuncCallExp(fi, node, r, 0);//0代表无返回值
+    fi.freeReg();
+}
+
+
+function cgStat(fi, stat)
+{
+    switch (stat.type) {
+        case "IfStat":
+            cgIfStat(fi, stat);
+            break;
+
+        case "FuncCallExp":
+            cgFuncCallStat(fi, stat);
+            break;
+        default:
+            throw "cgStat error";
+            break;
+    }
+}
+
+function cgBlock(fi, blockNode)
+{
+    for (let i = 0; i < blockNode.stats.length; i++)
+    {
+        let stat = blockNode.stats[i];
+        cgStat(fi, stat);
+    }
+
+    if (blockNode.retExps != null)
+    {
+        cgRetStat(fi, blockNode.retExps);//不会执行到这
+    }
+}
 ///////////////////////////////////////////////////////////////////////////
 
 function luaMain()
@@ -1883,8 +2307,21 @@ function parse(lexer)
 {
     let ast = parseBlock(lexer);
 
-    //console.log(Obj2json({i:1,b:2}));
     console.log("ast", ast);
+
+    let fi = newFuncInfo();
+
+    cgBlock(fi, ast);
+
+    for (let i = 0; i < fi.insts.length; i++)
+    {
+        let code = fi.insts[i];
+        let ii = inst(code)
+        
+        printOperands(ii);
+    }
+    
+
 }
 
 function lexerTokens()
