@@ -497,7 +497,17 @@ function _eq(inst, ls)
 
 function _loadBool(inst, ls)
 {
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+    let c = i.c;
 
+    ls.pushBoolean(b != 0);
+    ls.replace(a);
+    if (c != 0)
+    {
+        ls.addPC(1);
+    }
 }
 
 function _compare(inst, ls, op)
@@ -679,9 +689,6 @@ function printCode(proto)
     {
         let code = proto.Code[i];
         let inst_ = inst(code);
-
-        //打印指令码名称
-        console.log("%d %s", i+1, inst_.OpInfo.name);
 
         //打印指令码参数
         printOperands(inst_);
@@ -1005,7 +1012,16 @@ function newLuaState()
     ls.load = function(fileData, chunkName, mode)
     {
         //只支持载入虚拟机文件
-        let proto = unDump(fileData);
+        let proto;
+        if (proto_ == null)
+        {
+            proto = unDump(fileData);
+        }
+        else
+        {
+            proto = proto_;
+        }
+        
 
         let c = newLuaClosure(proto);
 
@@ -1169,6 +1185,11 @@ function newLuaState()
         ls.stack.push(n);
     };
 
+    ls.pushBoolean = function(b)
+    {
+        ls.stack.push(b);
+    };
+
     ls.arith = function(op)
     {
         //只处理加法指令
@@ -1225,6 +1246,7 @@ function setValue(ls)
 
 let ls;
 let fileData_;
+let proto_ = null;
 
 //sysctl中收集到所有需要的变量的值了，会调用这个函数运行脚本
 //暂时支持一台设备
@@ -1887,6 +1909,7 @@ function newFuncInfo()
     let i = {};
     i.usedRegs = 0;//初始寄存器
     i.insts = [];//存储指令的数组
+    i.maxRegs = 0;
 
     //寄存器分配
     i.allocReg = function ()
@@ -2047,6 +2070,65 @@ function newFuncInfo()
     i.emitCall = function(a, nArgs, nRet)
     {
         i.emitABC(OP_CALL, a, nArgs+1, nRet+1);
+    }
+
+    i.emitReturn = function(a, n)
+    {
+        i.emitABC(OP_RETURN, a, n+1, 0);
+    }
+
+    ////////////////////////////////
+    //创建upvalue
+    i.getUpvalues = function()
+    {
+        let upvals = [];
+
+        upvals.push({Instack:0, Idx:0});
+
+        return upvals;
+    }
+
+    i.getConstants = function()
+    {
+        let consts = [];
+        //从map中得到从0开始的值
+        let current = 0;
+
+        for (let j = 0; j < i.constants.size; j++)
+        {
+			for (let item of i.constants.keys())
+			{
+				if (i.constants.get(item) == current)
+				{
+					consts.push(item);
+					current++;
+					break;
+				}
+				
+			}
+        }
+
+        return consts;
+    }
+
+    //从fi生成支持虚拟机运行的proto
+    i.toProto = function()
+    {
+        return {
+            Source : "",
+            LineDefined : 0,
+            LastLineDefined : 0,
+            NumParams : 0,
+            IsVararg : 0,
+            MaxStackSize : i.maxRegs,
+            Code : i.insts,
+            Constants : i.getConstants(),
+            Upvalues : i.getUpvalues(),
+            Protos : [],
+            LineInfo : [],
+            LocVars : [],
+            UpvalueNames : []
+        };
     }
 
     return i;
@@ -2313,6 +2395,9 @@ function parse(lexer)
 
     cgBlock(fi, ast);
 
+    //添加最后的return语句
+    fi.emitReturn(0, 0);
+
     for (let i = 0; i < fi.insts.length; i++)
     {
         let code = fi.insts[i];
@@ -2321,7 +2406,7 @@ function parse(lexer)
         printOperands(ii);
     }
     
-
+    return fi.toProto();
 }
 
 function lexerTokens()
@@ -2338,18 +2423,21 @@ function lexerTokens()
         let lexer = newLexer(str, "alarmOrNot-onlyif.lua");
 
         
-        parse(lexer);
+        proto_ = parse(lexer);
 
-        // while(1)
-        // {
-        //     let i = lexer.nextToken();
-        //     console.log("%d ",i.line, i.kind, i.token);
+        ls = newLuaState();//创建state
+        //fileData_ = fileData;
 
-        //     if (i.kind == TOKEN_EOF)
-        //     {   
-        //         break;
-        //     }
-        // }
+        ls.register("setValue", setValue);//注册setValue函数
+
+        let button = '{"type":"button","name":"buttonAlarm","device_id":[1],"variable":[4],"value":[0],"x":120,"y":0}';
+
+        let buttonAlarm = jsonParse(button);
+
+        //console.log(buttonAlarm);
+
+        ls.pushInteger(buttonAlarm);//入栈一个整数
+        ls.setGlobal("buttonAlarm");
     })
 }
 
