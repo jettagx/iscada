@@ -1,6 +1,10 @@
-if(labelA + labelB + labelC == 3)
-then
-    setValue(buttonAlarm, 0)
-else
-    setValue(buttonAlarm, 1)
-end  
+function alarmOrNot()
+    if(labelA + labelB + labelC == 3)
+    then
+        setValue(buttonAlarm, 0)
+    else
+        setValue(buttonAlarm, 1)
+    end  
+end
+
+alarmOrNot()

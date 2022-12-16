@@ -1778,7 +1778,7 @@ function parseExpList(lexer)
 //解析函数参数
 function _parseArgs(lexer)
 {
-    let args;
+    let args = [];
 
     switch (lexer.lookAhead()) {
         case TOKEN_SEP_LPAREN:
@@ -1864,6 +1864,86 @@ function parseAssignOrFuncCallStat(lexer)
     return prefixExp;
 }
 
+function _parseFuncName(lexer)
+{
+    let identifier = lexer.nextIdentifier();
+    let exp = nameExp(identifier.line, identifier.token);//函数名表达式
+
+    return exp;
+}
+
+function _parseParList(lexer)
+{
+    if (lexer.lookAhead() == TOKEN_SEP_RPAREN)
+    {
+        return {parList:null, isVararg:false};
+    }
+    else
+    {
+        throw "_parseParList error";
+    }
+}
+
+function funcDefExp(line, lastLine, parList, isVararg, block)
+{
+    let i = {};
+
+    i.line = line;
+    i.lastLine = lastLine;
+    i.parList = parList;
+    i.isVararg = isVararg;
+    i.block = block;
+
+    i.type = "FuncDefExp";
+
+    return i;
+}
+
+
+function parseFuncDefExp(lexer)
+{
+    let line = lexer.line;
+    lexer.nextTokenOfKind(TOKEN_SEP_LPAREN);//确保是(
+    let list = _parseParList(lexer);//解析函数参数
+    lexer.nextTokenOfKind(TOKEN_SEP_RPAREN);//确保是)
+
+    let block = parseBlock(lexer);//解析函数体
+
+    let last = lexer.nextTokenOfKind(TOKEN_KW_END);//确保是end
+
+    return funcDefExp(line, last.line, list.parList, list.isVararg, block);
+}
+
+function assignStat(lastLine, varList, expList)
+{
+    let i = {};
+
+    i.type = "AssignStat";
+
+    i.lastLine = lastLine;
+    i.varList = varList;
+    i.expList = expList;
+
+    return i;
+}
+
+//lua函数定义
+function parseFuncDefStat(lexer)
+{
+    lexer.nextTokenOfKind(TOKEN_KW_FUNCTION);
+
+    let fnExp = _parseFuncName(lexer);//解析函数名
+    let fdExp = parseFuncDefExp(lexer);//解析函数体
+
+    let varList = [];
+    varList.push(fnExp);
+
+    let expList = [];
+    expList.push(fdExp);
+
+    return assignStat(fdExp.line, varList, expList);//生成赋值语句
+}
+
 //解析语句
 function parseStat(lexer)
 {
@@ -1871,6 +1951,10 @@ function parseStat(lexer)
     {
         case TOKEN_KW_IF:
             return parseIfstat(lexer);
+            break;
+
+        case TOKEN_KW_FUNCTION:
+		    return parseFuncDefStat(lexer);
             break;
     
         default:
@@ -1910,6 +1994,8 @@ function newFuncInfo()
     i.usedRegs = 0;//初始寄存器
     i.insts = [];//存储指令的数组
     i.maxRegs = 0;
+
+    i.subFuncs = [];//支持子函数
 
     //寄存器分配
     i.allocReg = function ()
@@ -1952,7 +2038,7 @@ function newFuncInfo()
     {
         //如果常量名存在，返回常量索引
         let idx;
-        if (idx = i.constants.get(k))
+        if ((idx = i.constants.get(k)) != undefined)
         {
             return idx;
         }
@@ -2013,6 +2099,8 @@ function newFuncInfo()
     i.emitGetTabUp = function(a, b, varName)
     {
         let idx = i.indexOfConstant(varName);
+
+        console.log("emitGetTabUp", varName, idx, i.constants);
 
         idx = idx | 0x100;
 
@@ -2077,6 +2165,15 @@ function newFuncInfo()
         i.emitABC(OP_RETURN, a, n+1, 0);
     }
 
+    i.emitClosure = function(a, bx)
+    {
+        i.emitABx(OP_CLOSURE, a, bx);
+    }
+
+    i.emitSetTabUp = function(a, b, c)
+    {
+        i.emitABC(OP_SETTABUP, a, b, c);
+    }
     ////////////////////////////////
     //创建upvalue
     i.getUpvalues = function()
@@ -2096,19 +2193,39 @@ function newFuncInfo()
 
         for (let j = 0; j < i.constants.size; j++)
         {
-			for (let item of i.constants.keys())
-			{
-				if (i.constants.get(item) == current)
-				{
-					consts.push(item);
-					current++;
-					break;
-				}
-				
-			}
+            for (let item of i.constants.keys())
+            {
+                if (i.constants.get(item) == current)
+                {
+                    consts.push(item);
+                    current++;
+                    break;
+                }
+                
+            }
         }
 
         return consts;
+    }
+
+    i.toProtos = function(fis)
+    {
+        let protos = [];
+        for (let j = 0; j < fis.length; j++)
+        {
+            protos.push(fis[j].toProto());
+            // let fi = fis[j];
+            // for (let k = 0; k < fi.insts.length; k++)
+            // {
+            //     let code = fi.insts[k];
+            //     let ii = inst(code)
+                
+            //     printOperands(ii);
+            // }
+            
+        }
+        console.log("protos:", protos);
+        return protos;
     }
 
     //从fi生成支持虚拟机运行的proto
@@ -2124,7 +2241,7 @@ function newFuncInfo()
             Code : i.insts,
             Constants : i.getConstants(),
             Upvalues : i.getUpvalues(),
-            Protos : [],
+            Protos : i.toProtos(i.subFuncs),
             LineInfo : [],
             LocVars : [],
             UpvalueNames : []
@@ -2190,6 +2307,7 @@ function cgNameExp(fi, node, a)
 
 function prepFuncCall(fi, node, a)
 {
+    //console.log("node:", node);
     let nArgs = node.args.length;
 
     cgExp(fi, node.prefixExp, a, 1);//加载函数
@@ -2212,6 +2330,24 @@ function cgFuncCallExp(fi, node, a, n)
 {
     let nArgs = prepFuncCall(fi, node, a);
     fi.emitCall(a, nArgs, n);//生成call指令
+}
+
+//生成函数定义语句
+function cgFuncDefExp(fi, node, a)
+{
+    let subFi = newFuncInfo(fi, node);//生成子fi，最终用于生成子proto
+
+    fi.subFuncs.push(subFi);
+
+    //console.log("node.block", node.block);
+
+    cgBlock(subFi, node.block);//生成函数内部语句;
+
+    subFi.emitReturn(0, 0);//在block指令后添加return语句
+
+    let bx = fi.subFuncs.length - 1;
+
+    fi.emitClosure(a, bx);//生成closure语句
 }
 
 //解析表达式
@@ -2249,6 +2385,10 @@ function cgExp(fi, exp, a, n)
         //case "TableAccessExp":
         //    cgTableAccessExp(fi, exp, a);
         //break;
+
+        case "FuncDefExp":
+		    cgFuncDefExp(fi, exp, a);
+            break;
 
         default:
             break;
@@ -2310,12 +2450,35 @@ function cgFuncCallStat(fi, node)
     fi.freeReg();
 }
 
+//赋值语句
+function cgAssignStat(fi, node)
+{
+    //只支持单个函数表达式和单个变量
+    let var_ =  node.varList[0];
+    let func = node.expList[0];
+
+    //访问函数表达式，生成CLOSURE指令
+    let a = fi.allocReg();
+    cgExp(fi, func, a, 0);//处理FuncDefExp类型，生成closure语句
+    fi.freeReg();
+
+    //生成settapup语句
+    //查找var_在常量表的索引
+    let index = fi.indexOfConstant(var_.name);
+    index |= 0x100;//转换为常量表索引
+
+    fi.emitSetTabUp(0, index, a);
+}
 
 function cgStat(fi, stat)
 {
     switch (stat.type) {
         case "IfStat":
             cgIfStat(fi, stat);
+            break;
+
+        case "AssignStat":
+		    cgAssignStat(fi, stat);
             break;
 
         case "FuncCallExp":
