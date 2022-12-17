@@ -1284,6 +1284,8 @@ const TOKEN_KW_ELSE = 11;//else
 const TOKEN_KW_END = 12;//end
 const TOKEN_KW_RETURN = 13;//return
 
+const TOKEN_OP_ASSIGN = 14;
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1855,13 +1857,35 @@ function parsePrefixExp(lexer)
     return _finishPrefixExp(lexer, exp);
 }
 
-//函数调用
+function parseAssignStat(lexer, prefixExp)
+{
+    let varList = [];
+    let expList = [];
+
+    varList.push(prefixExp);//暂时只支持一个变量的情况
+    lexer.nextTokenOfKind(TOKEN_OP_ASSIGN);//确保为=号
+    expList = parseExpList(lexer);//解析表达式
+
+    let lastLine = lexer.line;
+
+    return assignStat(lastLine, varList, expList);
+}
+
+//函数调用和赋值语句
 function parseAssignOrFuncCallStat(lexer)
 {
     //暂时只支持函数调用
     let prefixExp = parsePrefixExp(lexer);
 
-    return prefixExp;
+    //扩展支持赋值语句
+    if (prefixExp.type == "FuncCallExp")
+    {
+        return prefixExp;
+    }
+    else
+    {
+        return parseAssignStat(lexer, prefixExp);
+    }
 }
 
 function _parseFuncName(lexer)
@@ -2459,8 +2483,8 @@ function cgAssignStat(fi, node)
 
     //访问函数表达式，生成CLOSURE指令
     let a = fi.allocReg();
-    cgExp(fi, func, a, 0);//处理FuncDefExp类型，生成closure语句
-    fi.freeReg();
+    cgExp(fi, func, a, 0);//处理FuncDefExp类型，生成closure语句||
+    fi.freeReg();         //处理数字类型，生成loadk指令
 
     //生成settapup语句
     //查找var_在常量表的索引
