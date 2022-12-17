@@ -311,6 +311,7 @@ const OP_SETTABUP = 0x08;
 const OP_EQ = 0x1f;
 
 const OP_LOADBOOL = 0x3;
+const OP_MOVE = 0x0;
 
 
 opCodes[OP_GETTABUP]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
@@ -325,6 +326,7 @@ opCodes[OP_SETTABUP] =  getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABUP", _setta
 opCodes[OP_EQ] =  getOpInfo(1, 0, OpArgK, OpArgK, IABC, "EQ", _eq);
 
 opCodes[OP_LOADBOOL] =  getOpInfo(1, 0, OpArgU, OpArgU, IABC, "LOADBOOL", _loadBool);
+opCodes[OP_MOVE] =  getOpInfo(0, 1, OpArgR, OpArgN, IABC, "MOVE", _move);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -509,6 +511,16 @@ function _loadBool(inst, ls)
         ls.addPC(1);
     }
 }
+
+function _move(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b + 1;
+    
+    ls.copy(b, a);
+}
+
 
 function _compare(inst, ls, op)
 {
@@ -1200,6 +1212,12 @@ function newLuaState()
         ls.stack.push(a+b);
     };
 
+    ls.copy = function(fromIdx, toIdx)
+    {
+        let val = ls.stack.get(fromIdx);
+        ls.stack.set(toIdx, val);
+    }
+
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
 
     return ls;
@@ -1284,7 +1302,8 @@ const TOKEN_KW_ELSE = 11;//else
 const TOKEN_KW_END = 12;//end
 const TOKEN_KW_RETURN = 13;//return
 
-const TOKEN_OP_ASSIGN = 14;
+const TOKEN_OP_ASSIGN = 14;//=
+const TOKEN_KW_LOCAL = 15;//local
 
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
@@ -1292,6 +1311,7 @@ keywords.set("if", TOKEN_KW_IF);
 keywords.set("then", TOKEN_KW_THEN);
 keywords.set("else", TOKEN_KW_ELSE);
 keywords.set("end", TOKEN_KW_END);
+keywords.set("local", TOKEN_KW_LOCAL);
 
 function newLexer(chunk, chunkName)
 {
@@ -1529,6 +1549,19 @@ function newIfStat(exps, blocks)
     i.blocks = blocks;
 
     i.type = "IfStat";//for代码生成
+
+    return i;
+}
+
+function newLocalValDeclStat(lastline, nameList, expList)
+{
+    let i = {};
+
+    i.lastline = lastline;
+    i.nameList = nameList;
+    i.expList = expList;
+
+    i.type = "LocalValDeclStat";//for代码生成
 
     return i;
 }
@@ -1968,6 +2001,43 @@ function parseFuncDefStat(lexer)
     return assignStat(fdExp.line, varList, expList);//生成赋值语句
 }
 
+function _finishLocalVarDeclStat(lexer)
+{
+    let ident = lexer.nextIdentifier();
+    let nameList = [];
+    nameList.push(ident.token);//只支持一个变量名
+
+    let expList = [];
+
+    if (lexer.lookAhead() == TOKEN_OP_ASSIGN)
+    {
+        lexer.nextToken();
+        expList = parseExpList(lexer);//解析表达式
+    }
+
+    let lastLine = lexer.line;
+
+    //console.log("_finishLocalVarDeclStat", nameList, expList);
+
+    return newLocalValDeclStat(lastLine, nameList, expList);
+}
+
+//local a = 2;
+function parseLocalAssignOrFuncDefStat(lexer)
+{
+    lexer.nextTokenOfKind(TOKEN_KW_LOCAL);
+
+    if (lexer.lookAhead() == TOKEN_KW_FUNCTION)
+    {
+        //暂时不支持local类型的函数定义
+        throw "parseLocalAssignOrFuncDefStat function error";
+    }
+    else
+    {
+        return _finishLocalVarDeclStat(lexer);
+    }
+}
+
 //解析语句
 function parseStat(lexer)
 {
@@ -1979,6 +2049,9 @@ function parseStat(lexer)
 
         case TOKEN_KW_FUNCTION:
 		    return parseFuncDefStat(lexer);
+
+        case TOKEN_KW_LOCAL:
+            return parseLocalAssignOrFuncDefStat(lexer); 
             break;
     
         default:
@@ -2011,6 +2084,18 @@ function parseRetExps(lexer)
 //////////////////////////
 //代码生成
 
+function newlLocVarInfo(name, prev, slot)
+{
+    let i = {};
+
+    i.name = name;
+    i.prev = prev;
+    i.slot = slot;
+
+    return i;
+
+}
+
 //辅助代码生成
 function newFuncInfo()
 {
@@ -2020,6 +2105,33 @@ function newFuncInfo()
     i.maxRegs = 0;
 
     i.subFuncs = [];//支持子函数
+
+    //支持局部变量
+    i.locVars = [];
+    i.locNames = new Map();
+
+    i.addLocVar = function(name)
+    {
+        let newVar = newlLocVarInfo(name, i.locNames.get(name),
+                                    i.allocReg());
+        i.locVars.push(newVar);
+
+        i.locNames.set(name, newVar);
+
+        return newVar.slot;
+    }
+
+    i.slotOfLocVar = function(name)
+    {
+        let j;
+
+        if ((j = i.locNames.get(name)) != undefined)
+        {
+            return j.slot;
+        }
+
+        return -1;
+    }
 
     //寄存器分配
     i.allocReg = function ()
@@ -2198,6 +2310,11 @@ function newFuncInfo()
     {
         i.emitABC(OP_SETTABUP, a, b, c);
     }
+
+    i.emitMove = function(a, b)
+    {
+        i.emitABC(OP_MOVE, a, b, 0);
+    }
     ////////////////////////////////
     //创建upvalue
     i.getUpvalues = function()
@@ -2325,8 +2442,17 @@ function StringExp(line, str)
 
 function cgNameExp(fi, node, a)
 {
-    //只支持全局变量 GETTABUP
-    fi.emitGetTabUp(a, 0, node.name);
+    let r;
+    if ((r = fi.slotOfLocVar(node.name)) >= 0)
+    {
+        //局部变量
+        fi.emitMove(a, r);
+    }
+    else
+    {
+        //全局变量 GETTABUP
+        fi.emitGetTabUp(a, 0, node.name);
+    } 
 }
 
 function prepFuncCall(fi, node, a)
@@ -2494,6 +2620,21 @@ function cgAssignStat(fi, node)
     fi.emitSetTabUp(0, index, a);
 }
 
+function cgLocalVarDeclStat(fi, node)
+{
+    //暂时只支持一个变量，一个表达式的情况
+    let exp = node.expList[0];
+    let name = node.nameList[0];
+
+    let a = fi.allocReg();
+
+    cgExp(fi, exp, a, 1);//生成loadK指令载入数字2
+
+    fi.freeReg();
+
+    fi.addLocVar(name);//添加局部变量到局部变量表
+}
+
 function cgStat(fi, stat)
 {
     switch (stat.type) {
@@ -2508,6 +2649,11 @@ function cgStat(fi, stat)
         case "FuncCallExp":
             cgFuncCallStat(fi, stat);
             break;
+
+        case "LocalValDeclStat":
+            cgLocalVarDeclStat(fi, stat);
+            break;
+
         default:
             throw "cgStat error";
             break;
