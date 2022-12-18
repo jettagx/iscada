@@ -1,7 +1,5 @@
-a = 3
+local a = 3
 function alarmOrNot()
-    local a = 2
-
     if(labelA + labelB + labelC == a)
     then
         setValue(buttonAlarm, 1)

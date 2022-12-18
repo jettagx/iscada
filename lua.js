@@ -313,20 +313,24 @@ const OP_EQ = 0x1f;
 const OP_LOADBOOL = 0x3;
 const OP_MOVE = 0x0;
 
+const OP_GETUPVAL = 0x05;
 
-opCodes[OP_GETTABUP]  = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
-opCodes[OP_LOADK]  = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
+
+opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
+opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
 opCodes[OP_CALL] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "CALL", _call);
 opCodes[OP_RETURN] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "RETURN", _return);
-opCodes[OP_ADD] =  getOpInfo(0, 1, OpArgK, OpArgK, IABC, "ADD", _add);
-opCodes[OP_TEST] =  getOpInfo(1, 0, OpArgN, OpArgU, IABC, "TEST", _test);
-opCodes[OP_JMP] =  getOpInfo(0, 0, OpArgR, OpArgN, IAsBx, "JMP", _jmp);
-opCodes[OP_CLOSURE] =  getOpInfo(0, 1, OpArgU, OpArgN, IABx, "CLOSURE", _closure);
-opCodes[OP_SETTABUP] =  getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABUP", _settabup);
-opCodes[OP_EQ] =  getOpInfo(1, 0, OpArgK, OpArgK, IABC, "EQ", _eq);
+opCodes[OP_ADD] = getOpInfo(0, 1, OpArgK, OpArgK, IABC, "ADD", _add);
+opCodes[OP_TEST] = getOpInfo(1, 0, OpArgN, OpArgU, IABC, "TEST", _test);
+opCodes[OP_JMP] = getOpInfo(0, 0, OpArgR, OpArgN, IAsBx, "JMP", _jmp);
+opCodes[OP_CLOSURE] = getOpInfo(0, 1, OpArgU, OpArgN, IABx, "CLOSURE", _closure);
+opCodes[OP_SETTABUP] = getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABUP", _settabup);
+opCodes[OP_EQ] = getOpInfo(1, 0, OpArgK, OpArgK, IABC, "EQ", _eq);
 
-opCodes[OP_LOADBOOL] =  getOpInfo(1, 0, OpArgU, OpArgU, IABC, "LOADBOOL", _loadBool);
-opCodes[OP_MOVE] =  getOpInfo(0, 1, OpArgR, OpArgN, IABC, "MOVE", _move);
+opCodes[OP_LOADBOOL] = getOpInfo(1, 0, OpArgU, OpArgU, IABC, "LOADBOOL", _loadBool);
+opCodes[OP_MOVE] = getOpInfo(0, 1, OpArgR, OpArgN, IABC, "MOVE", _move);
+
+opCodes[OP_GETUPVAL] = getOpInfo(0, 1, OpArgU, OpArgN, IABC, "GETUPVAL", _getUpval);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -521,6 +525,14 @@ function _move(inst, ls)
     ls.copy(b, a);
 }
 
+function _getUpval(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b + 1;
+    
+    ls.copy(luaUpvalueIndex(b), a);
+}
 
 function _compare(inst, ls, op)
 {
@@ -941,7 +953,8 @@ function newLuaState()
 
             if (subProto.Upvalues[i].Instack == 1)
             {
-                throw "loadProto unsupport";
+                //throw "loadProto unsupport";
+                closure.upvals[i] = ls.stack.slots[uvIdx];//支持绑定局部变量
             }
             else
             {
@@ -2084,7 +2097,7 @@ function parseRetExps(lexer)
 //////////////////////////
 //代码生成
 
-function newlLocVarInfo(name, prev, slot)
+function newlLocVarInfo(name, prev, slot, captured)
 {
     let i = {};
 
@@ -2092,12 +2105,25 @@ function newlLocVarInfo(name, prev, slot)
     i.prev = prev;
     i.slot = slot;
 
+    i.captured = captured;
+
     return i;
 
 }
 
+function newUpvalInfo(localVarSlot, upvalIndex, index)
+{
+    let i = {};
+
+    i.localVarSlot = localVarSlot;
+    i.upvalIndex = upvalIndex;
+    i.index = index;
+
+    return i;
+}
+
 //辅助代码生成
-function newFuncInfo()
+function newFuncInfo(parent, fd)
 {
     let i = {};
     i.usedRegs = 0;//初始寄存器
@@ -2110,10 +2136,14 @@ function newFuncInfo()
     i.locVars = [];
     i.locNames = new Map();
 
+    //支持upvalues
+    i.parent = parent;
+    i.upvalues = new Map();
+
     i.addLocVar = function(name)
     {
         let newVar = newlLocVarInfo(name, i.locNames.get(name),
-                                    i.allocReg());
+                                    i.allocReg(), false);
         i.locVars.push(newVar);
 
         i.locNames.set(name, newVar);
@@ -2316,12 +2346,25 @@ function newFuncInfo()
         i.emitABC(OP_MOVE, a, b, 0);
     }
     ////////////////////////////////
-    //创建upvalue
+    //创建Upvalues
     i.getUpvalues = function()
     {
         let upvals = [];
 
-        upvals.push({Instack:0, Idx:0});
+        for (let item of i.upvalues.keys())
+        {
+            let slot;
+            let upvalIndex = i.upvalues.get(item).upvalIndex;
+
+            if ((slot = i.upvalues.get(item).localVarSlot) >= 0)//如果绑定的是父的局部变量
+            {
+                upvals.push({Instack:1, Idx:slot});
+            }   
+            else
+            {
+                upvals.push({Instack:0, Idx:upvalIndex});//如果绑定的是父的upvalue
+            }
+        }
 
         return upvals;
     }
@@ -2389,6 +2432,49 @@ function newFuncInfo()
         };
     }
 
+    i.indexOfUpval = function(name)
+    {
+        let upval;
+        if ((upval = i.upvalues.get(name)) != undefined)
+        {
+            //如果变量名和upvalues绑定了，直接返回
+            return upval.index;
+        }
+
+        if (i.parent != null)
+        {
+            //只有父fi不为null，可以执行这
+            let locVar;
+            if ((locVar = i.parent.locNames.get(name)) != undefined)
+            {
+                //如果这个变量是父的局部变量
+                let idx = i.upvalues.size;
+                i.upvalues.set(name, newUpvalInfo(locVar.slot, -1, idx));//绑定变量名和变量的lua栈值
+                
+                locVar.captured = true;//设置被捕获标志
+
+                return idx;
+            }
+
+            //如果这个变量不是父的变量，可能是祖父的变量,会被父捕获
+            let uvIdx;
+            if ((uvIdx = i.parent.indexOfUpval(name)) >= 0)
+            {
+                let idx = i.upvalues.size;
+                i.upvalues.set(name, newUpvalInfo(-1, uvIdx, idx));//记录父捕获的index
+
+                return idx;
+            }
+        }
+
+        return -1;
+    }
+
+    i.emitGetUpval = function(a, b)
+    {
+        i.emitABC(OP_GETUPVAL, a, b, 0);
+    }
+
     return i;
 }
 
@@ -2448,10 +2534,17 @@ function cgNameExp(fi, node, a)
         //局部变量
         fi.emitMove(a, r);
     }
+    else if((r = fi.indexOfUpval(node.name)) >= 0)
+    {
+        //upvalues
+        fi.emitGetUpval(a, r);
+    }
     else
     {
         //全局变量 GETTABUP
-        fi.emitGetTabUp(a, 0, node.name);
+        //先访问_ENV变量，使得main中捕获这个变量
+        r = fi.indexOfUpval("_ENV");
+        fi.emitGetTabUp(a, r, node.name);
     } 
 }
 
@@ -2724,22 +2817,22 @@ function parse(lexer)
 
     console.log("ast", ast);
 
-    let fi = newFuncInfo();
+    let fd = funcDefExp(0, 0, null, false, ast);//手工定义main函数
+    let fi = newFuncInfo(null, null);//定义最外层fi
 
-    cgBlock(fi, ast);
+    fi.addLocVar("_ENV");//添加_ENV变量
 
-    //添加最后的return语句
-    fi.emitReturn(0, 0);
+    cgFuncDefExp(fi, fd, 0);//手工调用生成函数虚拟机指令
 
-    for (let i = 0; i < fi.insts.length; i++)
+    for (let i = 0; i < fi.subFuncs[0].insts.length; i++)
     {
-        let code = fi.insts[i];
+        let code = fi.subFuncs[0].insts[i];
         let ii = inst(code)
         
         printOperands(ii);
     }
     
-    return fi.toProto();
+    return fi.subFuncs[0].toProto();//main函数被解析为fi的唯一子函数，直接调用main函数
 }
 
 function lexerTokens()
