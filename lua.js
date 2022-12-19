@@ -348,6 +348,7 @@ function _pushFuncAndArgs(a, b, ls)
         //ls.checkStack(b)
         for (let i = a; i < a+b; i++)
         {
+            //console.log("_pushFuncAndArgs", ls.stack.slots[i]);
             ls.pushValue(i);//压入函数和函数参数
         }
 
@@ -412,6 +413,7 @@ function _call(inst, ls)
     let c = i.c;
 
     let nArgs = _pushFuncAndArgs(a, b, ls);
+    //console.log("nArgs", nArgs);
     ls.call(nArgs, c-1);
     _popResults(a, c, ls);
 }
@@ -1125,7 +1127,7 @@ function newLuaState()
     ls.callLuaClosure = function(nArgs, nResults, c)
     {
         let nRegs = c.proto.MaxStackSize;
-        let nParams = c.proto.NumParams;
+        let nParams = c.proto.NumParams;//需要修改这个地方，不然会得到undefined
 
         let isVararg = c.proto.IsVararg == 1;
 
@@ -1965,11 +1967,32 @@ function _parseParList(lexer)
 {
     if (lexer.lookAhead() == TOKEN_SEP_RPAREN)
     {
-        return {parList:null, isVararg:false};
+        return {parList:[], isVararg:false};
     }
     else
     {
-        throw "_parseParList error";
+        let ident = lexer.nextIdentifier();
+        let names = [];
+
+        names.push(ident.token);
+
+        //如果是逗号，说明还有参数，继续处理
+        while(lexer.lookAhead() == TOKEN_SEP_COMMA)
+        {
+            lexer.nextToken()//跳过逗号
+            if (lexer.LookAhead() == TOKEN_IDENTIFIER)
+            {   
+                //如果是标识符
+                let ident = lexer.nextIdentifier();
+                names.push(ident.token);
+            }
+            else
+            {
+                throw "_parseParList error";
+            }
+        }
+        //console.log("names:", names);
+        return {parList:names, isVararg:false}; 
     }
 }
 
@@ -2161,6 +2184,9 @@ function newFuncInfo(parent, fd)
     //支持upvalues
     i.parent = parent;
     i.upvalues = new Map();
+
+    //支持函数带参数
+    i.numParams = fd.parList.length;
 
     i.addLocVar = function(name)
     {
@@ -2420,14 +2446,14 @@ function newFuncInfo(parent, fd)
         for (let j = 0; j < fis.length; j++)
         {
             protos.push(fis[j].toProto());
-            // let fi = fis[j];
-            // for (let k = 0; k < fi.insts.length; k++)
-            // {
-            //     let code = fi.insts[k];
-            //     let ii = inst(code)
+            let fi = fis[j];
+            for (let k = 0; k < fi.insts.length; k++)
+            {
+                let code = fi.insts[k];
+                let ii = inst(code)
                 
-            //     printOperands(ii);
-            // }
+                printOperands(ii);
+            }
             
         }
         console.log("protos:", protos);
@@ -2441,7 +2467,7 @@ function newFuncInfo(parent, fd)
             Source : "",
             LineDefined : 0,
             LastLineDefined : 0,
-            NumParams : 0,
+            NumParams : i.numParams,//修改这，支持函数带参数
             IsVararg : 0,
             MaxStackSize : i.maxRegs,
             Code : i.insts,
@@ -2637,11 +2663,17 @@ function cgFuncCallExp(fi, node, a, n)
 //生成函数定义语句
 function cgFuncDefExp(fi, node, a)
 {
+    console.log("cgFuncDefExp:", node);
     let subFi = newFuncInfo(fi, node);//生成子fi，最终用于生成子proto
 
     fi.subFuncs.push(subFi);
 
-    //console.log("node.block", node.block);
+    for (let i = 0; i < node.parList.length; i++)
+    {
+        let par = node.parList[i];
+
+        subFi.addLocVar(par);
+    }
 
     cgBlock(subFi, node.block);//生成函数内部语句;
 
@@ -2876,8 +2908,8 @@ function parse(lexer)
 
     console.log("ast", ast);
 
-    let fd = funcDefExp(0, 0, null, false, ast);//手工定义main函数
-    let fi = newFuncInfo(null, null);//定义最外层fi
+    let fd = funcDefExp(0, 0, [], false, ast);//手工定义main函数
+    let fi = newFuncInfo(null, fd);//定义最外层fi
 
     fi.addLocVar("_ENV");//添加_ENV变量
 

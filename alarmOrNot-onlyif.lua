@@ -1,5 +1,5 @@
-function alarmOrNot()
-    local a = 3
+local a = 3
+function alarmOrNot(a)
     if(labelA + labelB + labelC == a)
     then
         local a = 1
@@ -11,4 +11,4 @@ function alarmOrNot()
     print(a)  
 end
 
-alarmOrNot()
+alarmOrNot(a)
