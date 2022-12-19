@@ -946,7 +946,7 @@ function newLuaState()
         //console.log("ls.stack.push(closure);",closure)
         ls.stack.push(closure);
 
-        //支持upvalue，暂不支持引用函数外变量
+        //支持upvalue
         for (let i = 0; i < subProto.Upvalues.length; i++)
         {
             let uvIdx = subProto.Upvalues[i].Idx;
@@ -1242,7 +1242,7 @@ function newLuaState()
 function print(ls)
 {
     //得到传来的参数
-    console.log(ls.stack.pop());
+    console.log("Jsprint:",ls.stack.pop());
     
     return 0;
 }
@@ -1266,7 +1266,7 @@ function setValue(ls)
         {
             if(tmp.result == "ok")
             {
-                console.log("脚本" + "成功");
+                //console.log("脚本" + "成功");
             }
         }
       });
@@ -1377,6 +1377,20 @@ function newLexer(chunk, chunkName)
         return token.kind;
     }
 
+    i.isWhiteSpace = function(c)
+    {
+        switch (c) {
+            case '\t':
+                return true;
+                break;
+        
+            default:
+                break;
+        }
+
+        return false;
+    }
+
     //跳过空白字符，如空格和换行符
     i.skipWhiteSpaces = function ()
     {
@@ -1390,6 +1404,11 @@ function newLexer(chunk, chunkName)
             {
                 i.next(2);
                 line++;
+            }
+            else if (i.isWhiteSpace(chunk[count]))
+            {
+                i.next(1);
+                break;
             }
             else
             {
@@ -2097,7 +2116,7 @@ function parseRetExps(lexer)
 //////////////////////////
 //代码生成
 
-function newlLocVarInfo(name, prev, slot, captured)
+function newlLocVarInfo(name, prev, slot, captured, scopeLv)
 {
     let i = {};
 
@@ -2106,6 +2125,8 @@ function newlLocVarInfo(name, prev, slot, captured)
     i.slot = slot;
 
     i.captured = captured;
+
+    i.scopeLv = scopeLv;
 
     return i;
 
@@ -2135,6 +2156,7 @@ function newFuncInfo(parent, fd)
     //支持局部变量
     i.locVars = [];
     i.locNames = new Map();
+    i.scopeLv = 0;
 
     //支持upvalues
     i.parent = parent;
@@ -2143,7 +2165,7 @@ function newFuncInfo(parent, fd)
     i.addLocVar = function(name)
     {
         let newVar = newlLocVarInfo(name, i.locNames.get(name),
-                                    i.allocReg(), false);
+                                    i.allocReg(), false, i.scopeLv);
         i.locVars.push(newVar);
 
         i.locNames.set(name, newVar);
@@ -2475,6 +2497,43 @@ function newFuncInfo(parent, fd)
         i.emitABC(OP_GETUPVAL, a, b, 0);
     }
 
+    i.enterScope = function(breakable)
+    {
+        i.scopeLv++;
+    }
+
+    i.exitScope = function()
+    {
+        i.scopeLv--;
+        for (let item of i.locNames.keys())
+        {
+            let locVar = i.locNames.get(item);
+
+            if (locVar.scopeLv > i.scopeLv)
+            {
+                i.removeLocVar(locVar);
+            }
+        }
+    }
+
+    i.removeLocVar = function(locVar)
+    {
+        i.freeReg();//释放变量占用的寄存器
+        if (locVar.prev == undefined)
+        {
+            i.locNames.delete(locVar.name);//删除这个变量
+        }
+        else if (locVar.prev.scope == locVar.scopeLv)
+        {
+            //如果当前作用域有多个同名局部变量，则全部释放
+            i.removeLocVar(locVar.prev);
+        }
+        else
+        {
+            i.locNames.set(locVar.name, locVar.prev);//指向前作用域的变量
+        }
+    }
+
     return i;
 }
 
@@ -2663,9 +2722,9 @@ function cgIfStat(fi, node)
 
         pcJmpToNextExp = fi.emitJmp(0, 0);//生成jmp语句
 
-        //fi.enterScope(false);
+        fi.enterScope(false);
         cgBlock(fi, node.blocks[i]);
-        //fi.exitScope();
+        fi.exitScope();
 
         if (i < node.exps.length - 1)
         {
@@ -2855,6 +2914,7 @@ function lexerTokens()
         //fileData_ = fileData;
 
         ls.register("setValue", setValue);//注册setValue函数
+        ls.register("print", print);//注册print函数
 
         let button = '{"type":"button","name":"buttonAlarm","device_id":[1],"variable":[4],"value":[0],"x":120,"y":0}';
 
