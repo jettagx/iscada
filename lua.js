@@ -2844,7 +2844,7 @@ function cgAssignStat(fi, node)
 
     //访问函数表达式，生成CLOSURE指令
     let a = fi.allocReg();
-    cgExp(fi, func, a, 0);//处理FuncDefExp类型，生成closure语句||
+    cgExp(fi, func, a, 1);//处理FuncDefExp类型，生成closure语句||
     fi.freeReg();         //处理数字类型，生成loadk指令
 
     //生成settapup语句

@@ -9,5 +9,5 @@ function alarmOrNot(a)
     return a + 1  
 end
 
-local b = alarmOrNot(a)
+b = alarmOrNot(a)
 print(b)
