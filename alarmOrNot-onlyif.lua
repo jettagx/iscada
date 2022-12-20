@@ -2,13 +2,12 @@ local a = 3
 function alarmOrNot(a)
     if(labelA + labelB + labelC == a)
     then
-        local a = 1
-        setValue(buttonAlarm, a)
+        setValue(buttonAlarm, 1)
     else
-        local a = 0
-        setValue(buttonAlarm, a)
+        setValue(buttonAlarm, 0)
     end
-    print(a)  
+    return a + 1  
 end
 
-alarmOrNot(a)
+local b = alarmOrNot(a)
+print(b)

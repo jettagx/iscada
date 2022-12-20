@@ -420,7 +420,27 @@ function _call(inst, ls)
 
 function _return(inst, ls)
 {
-    //console.log("_return");
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+
+    if (b == 1)
+    {
+        //无返回值，什么也不做
+    }
+    else if (b > 1)
+    {
+        //有b-1个参数
+        //ls.checkStack(b-1);
+        for (let j = a; j <= a + b - 2; j++)
+        {
+            ls.pushValue(j);
+        }
+    }
+    else
+    {
+        throw "_return error";
+    }
 }
 
 const LUA_OPADD = 0;
@@ -1328,6 +1348,8 @@ keywords.set("else", TOKEN_KW_ELSE);
 keywords.set("end", TOKEN_KW_END);
 keywords.set("local", TOKEN_KW_LOCAL);
 
+keywords.set("return", TOKEN_KW_RETURN);
+
 function newLexer(chunk, chunkName)
 {
     let i = {};
@@ -1630,6 +1652,7 @@ function isBlockEnd(tokenKind)
         case TOKEN_EOF:
         case TOKEN_KW_END:
         case TOKEN_KW_ELSE:
+        case TOKEN_KW_RETURN:
             return true;
             break;
     
@@ -2126,13 +2149,23 @@ function parseStats(lexer)
     return stats;
 }
 
-//解析返回语句，我们暂时不支持返回语句
+//解析返回语句
 function parseRetExps(lexer)
 {
     if (lexer.lookAhead() != TOKEN_KW_RETURN)
     {
         return null;
     }
+
+    lexer.nextToken();//跳过return关键字
+
+    //直接解析表达式，暂时只支持一个返回值
+    let exps = parseExpList(lexer);
+    // if (lexer.lookAhead() == TOKEN_SEP_SEMI)
+    // {
+    //     lexer.NextToken();//如果有分号，跳过
+    // }
+    return exps;
 }
 
 
@@ -2565,7 +2598,25 @@ function newFuncInfo(parent, fd)
 
 function cgRetStat(fi, retExps)
 {
-    throw "cgRetStat error";
+    let len = retExps.length;
+
+    if (len == 0)
+    {
+        fi.emitReturn(0, 0);
+    }
+    else if (len == 1)
+    {
+        //1个返回值
+        let r = fi.allocReg();
+        cgExp(fi, retExps[0], r, 1);//1代表如果是函数调用，有1个返回值
+        fi.freeReg();
+
+        fi.emitReturn(r, len);//生成返回指令
+    }
+    else
+    {
+        throw "cgRetStat error";
+    }
 }
 
 function cgBinopExp(fi, node, a)
@@ -2854,7 +2905,7 @@ function cgBlock(fi, blockNode)
 
     if (blockNode.retExps != null)
     {
-        cgRetStat(fi, blockNode.retExps);//不会执行到这
+        cgRetStat(fi, blockNode.retExps);//解析return语句
     }
 }
 ///////////////////////////////////////////////////////////////////////////
