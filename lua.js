@@ -315,6 +315,8 @@ const OP_MOVE = 0x0;
 
 const OP_GETUPVAL = 0x05;
 
+const OP_LOADNIL =  0x04;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -331,6 +333,8 @@ opCodes[OP_LOADBOOL] = getOpInfo(1, 0, OpArgU, OpArgU, IABC, "LOADBOOL", _loadBo
 opCodes[OP_MOVE] = getOpInfo(0, 1, OpArgR, OpArgN, IABC, "MOVE", _move);
 
 opCodes[OP_GETUPVAL] = getOpInfo(0, 1, OpArgU, OpArgN, IABC, "GETUPVAL", _getUpval);
+
+opCodes[OP_LOADNIL] = getOpInfo(0, 1, OpArgU, OpArgN, IABC, "LOADNIL", _loadNil);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -554,6 +558,22 @@ function _getUpval(inst, ls)
     let b = i.b + 1;
     
     ls.copy(luaUpvalueIndex(b), a);
+}
+
+function _loadNil(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+
+    ls.pushNil();
+
+    for (let j = a; j <= a+b; j++)
+    {
+        ls.copy(-1, j);
+    }
+
+    ls.pop(1);
 }
 
 function _compare(inst, ls, op)
@@ -1006,6 +1026,12 @@ function newLuaState()
     {
         //将t的k键压入lua栈
         let v = t.get(k);
+
+        if (v == undefined)
+        {
+            v = null;
+        }
+
         ls.stack.push(v);
     };
 
@@ -1251,6 +1277,11 @@ function newLuaState()
     {
         let val = ls.stack.get(fromIdx);
         ls.stack.set(toIdx, val);
+    }
+
+    ls.pushNil = function()
+    {
+        ls.stack.push(null);
     }
 
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
@@ -2426,6 +2457,11 @@ function newFuncInfo(parent, fd)
     {
         i.emitABC(OP_MOVE, a, b, 0);
     }
+
+    i.emitLoadNil = function(a, n)
+    {
+        i.emitABC(OP_LOADNIL, a, n-1, 0);
+    }
     ////////////////////////////////
     //创建Upvalues
     i.getUpvalues = function()
@@ -2861,12 +2897,22 @@ function cgLocalVarDeclStat(fi, node)
     let exp = node.expList[0];
     let name = node.nameList[0];
 
-    let a = fi.allocReg();
+    if (exp != undefined)
+    {
+        let a = fi.allocReg();
 
-    cgExp(fi, exp, a, 1);//生成loadK指令载入数字2
+        cgExp(fi, exp, a, 1);//生成loadK指令载入数字2
 
-    fi.freeReg();
-
+        fi.freeReg();
+    }
+    else
+    {
+        //生成一条loadNil指令
+        let a = fi.allocReg();
+        fi.emitLoadNil(a, 1);
+        fi.freeReg();
+    }
+    
     fi.addLocVar(name);//添加局部变量到局部变量表
 }
 

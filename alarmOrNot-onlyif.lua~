@@ -1,14 +1,2 @@
-local a = 3
-function alarmOrNot(a)
-    if(labelA + labelB + labelC == a)
-    then
-        setValue(buttonAlarm, 1)
-    return 1 
-    else
-        setValue(buttonAlarm, 0)
-    return 0 
-    end
-end
-
-b = alarmOrNot(a)
+local a 
 print(b)
