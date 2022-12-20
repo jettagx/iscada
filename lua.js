@@ -317,6 +317,8 @@ const OP_GETUPVAL = 0x05;
 
 const OP_LOADNIL =  0x04;
 
+const OP_GETTABLE = 0x07;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -335,6 +337,8 @@ opCodes[OP_MOVE] = getOpInfo(0, 1, OpArgR, OpArgN, IABC, "MOVE", _move);
 opCodes[OP_GETUPVAL] = getOpInfo(0, 1, OpArgU, OpArgN, IABC, "GETUPVAL", _getUpval);
 
 opCodes[OP_LOADNIL] = getOpInfo(0, 1, OpArgU, OpArgN, IABC, "LOADNIL", _loadNil);
+
+opCodes[OP_GETTABLE] = getOpInfo(0, 1, OpArgR, OpArgK, IABC, "GETTABLE", _getTable);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -574,6 +578,18 @@ function _loadNil(inst, ls)
     }
 
     ls.pop(1);
+}
+
+function _getTable(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b + 1;
+    let c = i.c;
+
+    ls.getRK(c);
+    ls.getTable(b);
+    ls.replace(a);
 }
 
 function _compare(inst, ls, op)
@@ -922,6 +938,8 @@ function newLuaClosure(proto)
     let c = {};
     c.proto = proto;
 
+    //console.log("ls.loadProto",proto.Upvalues)
+
     //支持upvalues
     if (proto.Upvalues.length > 0)
     {   
@@ -985,7 +1003,7 @@ function newLuaState()
 
         let closure = newLuaClosure(subProto);
 
-        //console.log("ls.stack.push(closure);",closure)
+        //console.log("ls.loadProto",subProto.Upvalues)
         ls.stack.push(closure);
 
         //支持upvalue
@@ -1336,6 +1354,7 @@ let proto_ = null;
 //暂时支持一台设备
 function runLua(showThings)
 {
+    //console.log("runLua", showThings);
     for (let i = 0; i < showThings.length; i++)
     {
         let showThing = showThings[i];
@@ -2462,6 +2481,12 @@ function newFuncInfo(parent, fd)
     {
         i.emitABC(OP_LOADNIL, a, n-1, 0);
     }
+
+    i.emitGetTable = function(a, b, c)
+    {
+        i.emitABC(OP_GETTABLE, a, b, c);
+    }
+
     ////////////////////////////////
     //创建Upvalues
     i.getUpvalues = function()
@@ -2686,7 +2711,7 @@ function tableAccessExp(lastLine, prefixExp, keyExp)
     return i;
 }
 
-function StringExp(line, str)
+function stringExp(line, str)
 {
     let i = {};
 
@@ -2715,8 +2740,12 @@ function cgNameExp(fi, node, a)
     {
         //全局变量 GETTABUP
         //先访问_ENV变量，使得main中捕获这个变量
-        r = fi.indexOfUpval("_ENV");
-        fi.emitGetTabUp(a, r, node.name);
+        //r = fi.indexOfUpval("_ENV");
+        //fi.emitGetTabUp(a, r, node.name);
+        let taExp = tableAccessExp(0, nameExp(0, "_ENV"), 
+                                    stringExp(0, node.name));
+
+        cgTableAccessExp(fi, taExp, a);
     } 
 }
 
@@ -2771,6 +2800,19 @@ function cgFuncDefExp(fi, node, a)
     fi.emitClosure(a, bx);//生成closure语句
 }
 
+function cgTableAccessExp(fi, node, a)
+{
+    //新增指令GATTABLE
+    let b = fi.allocReg();
+    cgExp(fi, node.prefixExp, b, 1);//得到表
+
+    let c = fi.allocReg();
+    cgExp(fi, node.keyExp, c, 1);//得到表的键，用LoadK从常量表中加载
+
+    fi.emitGetTable(a, b, c);
+    fi.freeRegs(2);
+}
+
 //解析表达式
 function cgExp(fi, exp, a, n)
 {
@@ -2803,9 +2845,9 @@ function cgExp(fi, exp, a, n)
             fi.emitLoadK(a, exp.str);
         break;
 
-        //case "TableAccessExp":
-        //    cgTableAccessExp(fi, exp, a);
-        //break;
+        case "TableAccessExp":
+            cgTableAccessExp(fi, exp, a);
+        break;
 
         case "FuncDefExp":
 		    cgFuncDefExp(fi, exp, a);
@@ -2878,17 +2920,19 @@ function cgAssignStat(fi, node)
     let var_ =  node.varList[0];
     let func = node.expList[0];
 
-    //访问函数表达式，生成CLOSURE指令
     let a = fi.allocReg();
     cgExp(fi, func, a, 1);//处理FuncDefExp类型，生成closure语句||
     fi.freeReg();         //处理数字类型，生成loadk指令
+
+    //手动调用，否则无法绑定全局表
+    let upvalueIdx = fi.indexOfUpval("_ENV");
 
     //生成settapup语句
     //查找var_在常量表的索引
     let index = fi.indexOfConstant(var_.name);
     index |= 0x100;//转换为常量表索引
 
-    fi.emitSetTabUp(0, index, a);
+    fi.emitSetTabUp(upvalueIdx, index, a);
 }
 
 function cgLocalVarDeclStat(fi, node)
