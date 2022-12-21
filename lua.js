@@ -1860,7 +1860,7 @@ function tableConstructorExp(line, lastLine, keyExps, valExps)
 function _parseFildList(lexer)
 {
     let ks = [], vs = [];
-    return {ks, vs};
+    return {keyExps:ks, valExps:vs};
 }
 
 function parseTableConstructorExp(lexer)
@@ -3124,7 +3124,7 @@ function cgAssignStat(fi, node)
         fi.freeReg();
         return;
     }
-    
+
     ///////////////////////////////////////////////////////
     //常规全局变量
     // //手动调用，否则无法绑定全局表
