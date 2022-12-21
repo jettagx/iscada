@@ -1434,6 +1434,8 @@ const TOKEN_SEP_RCURLY = 18;//}
 const TOKEN_SEP_LBRACK = 19;//[
 const TOKEN_SEP_RBRACK = 20;//]
 
+const TOKEN_STRING = 21;//"内容"或者'内容'
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1583,6 +1585,26 @@ function newLexer(chunk, chunkName)
         return identifier;
     }
 
+    i.scanShortString = function()
+    {
+        let startL = chunk[count];
+
+        i.next(1);
+
+        let countStart = count;
+
+        //读到'或者"结束
+        while(chunk[count] != startL)
+        {
+            i.next(1);
+        }
+
+        shortString = chunk.substring(countStart, count);
+        i.next(1);//跳过结尾的符号'或者"
+        console.log("shortString", shortString);
+        return shortString;
+    }
+
     //返回行号，token类型，token
     i.nextToken = function ()
     {
@@ -1666,7 +1688,11 @@ function newLexer(chunk, chunkName)
                 return {line, kind:TOKEN_SEP_RBRACK, token:"]"};
                 break;
 
-        
+            case '\'':
+            case '"' :
+                return {line, kind:TOKEN_STRING, token:i.scanShortString()}; ;
+                break;
+
             default:
                 break;
         }
@@ -1886,6 +1912,12 @@ function primary(lexer)
         case TOKEN_SEP_LCURLY:
             return parseTableConstructorExp(lexer);
             break;
+
+        case TOKEN_STRING:
+            let token_ = lexer.nextToken();
+            return stringExp(token_.line, token_.token);
+            return ;
+            break
 
         default:
             break;
