@@ -1390,6 +1390,8 @@ const TOKEN_KW_RETURN = 13;//return
 const TOKEN_OP_ASSIGN = 14;//=
 const TOKEN_KW_LOCAL = 15;//local
 
+const TOKEN_SEP_DOT = 16;//.
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1447,7 +1449,6 @@ function newLexer(chunk, chunkName)
         i.nextTokenLine = token.line;
         i.nextTokenKind = token.kind;
         i.nextToken_ = token.token;
-
         return token.kind;
     }
 
@@ -1530,13 +1531,13 @@ function newLexer(chunk, chunkName)
         let countStart = count;
 
         while((chunk[count] >= 'a' && chunk[count] <= 'z') || 
-        (chunk[count] >= 'A' && chunk[count] <= 'Z'))
+        (chunk[count] >= 'A' && chunk[count] <= 'Z') || (chunk[count] == '_'))
         {
             i.next(1);
         }
 
         identifier = chunk.substring(countStart, count);
-
+        //console.log(identifier);
         return identifier;
     }
 
@@ -1597,6 +1598,10 @@ function newLexer(chunk, chunkName)
                 i.next(1);
                 return {line, kind:TOKEN_SEP_COMMA, token:","};
             break;
+
+            case '.':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_DOT, token:"."};
         
             default:
                 break;
@@ -1613,7 +1618,7 @@ function newLexer(chunk, chunkName)
         }
 
         //判断是否是标识符或关键字
-        if (i.isLetter(c))
+        if ((c == '_') || i.isLetter(c))
         {
             let token = i.scanIdentifier();
             //console.log("keywords[token]", keywords.get(token), token);
@@ -1958,6 +1963,15 @@ function _finishPrefixExp(lexer, exp)
     switch (lexer.lookAhead()) {
         case TOKEN_SEP_LPAREN:
             exp = _finishFuncCallExp(lexer, exp);
+            break;
+
+        case TOKEN_SEP_DOT:
+            //console.log("TOKEN_SEP_DOT");
+            lexer.nextToken();//跳过.
+            let ident = lexer.nextIdentifier();
+
+            let keyExp = stringExp(ident.line, ident.token);
+            exp = tableAccessExp(ident.line, exp, keyExp);
             break;
     
         default:
