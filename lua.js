@@ -319,6 +319,10 @@ const OP_LOADNIL =  0x04;
 
 const OP_GETTABLE = 0x07;
 
+const OP_NEWTABLE = 0x0b;
+
+const OP_SETTABLE = 0x0a;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -339,6 +343,10 @@ opCodes[OP_GETUPVAL] = getOpInfo(0, 1, OpArgU, OpArgN, IABC, "GETUPVAL", _getUpv
 opCodes[OP_LOADNIL] = getOpInfo(0, 1, OpArgU, OpArgN, IABC, "LOADNIL", _loadNil);
 
 opCodes[OP_GETTABLE] = getOpInfo(0, 1, OpArgR, OpArgK, IABC, "GETTABLE", _getTable);
+
+opCodes[OP_NEWTABLE] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "NEWTABLE", _newTable);
+
+opCodes[OP_SETTABLE] = getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABLE", _setTable);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -590,6 +598,29 @@ function _getTable(inst, ls)
     ls.getRK(c);
     ls.getTable(b);
     ls.replace(a);
+}
+
+function _newTable(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+    let c = i.c;
+
+    ls.createTable(fb2int(b), fb2int(c));
+    ls.replace(a);
+}
+
+function _setTable(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+    let c = i.c;
+
+    ls.getRK(b);
+    ls.getRK(c);
+    ls.setTable_(a);
 }
 
 function _compare(inst, ls, op)
@@ -1302,6 +1333,12 @@ function newLuaState()
         ls.stack.push(null);
     }
 
+    ls.createTable  =function(nArr, nRec)
+    {
+        let t = newLuaTable(nArr, nRec);
+	    ls.stack.push(t);
+    }
+
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
 
     return ls;
@@ -1391,6 +1428,11 @@ const TOKEN_OP_ASSIGN = 14;//=
 const TOKEN_KW_LOCAL = 15;//local
 
 const TOKEN_SEP_DOT = 16;//.
+
+const TOKEN_SEP_LCURLY = 17;//{
+const TOKEN_SEP_RCURLY = 18;//}
+const TOKEN_SEP_LBRACK = 19;//[
+const TOKEN_SEP_RBRACK = 20;//]
 
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
@@ -1602,6 +1644,28 @@ function newLexer(chunk, chunkName)
             case '.':
                 i.next(1);
                 return {line, kind:TOKEN_SEP_DOT, token:"."};
+                break;
+
+            case '{':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_LCURLY, token:"{"};
+                break;
+
+            case '}':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_RCURLY, token:"}"};
+                break;
+
+            case '[':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_LBRACK, token:"["};
+                break;
+
+            case ']':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_RBRACK, token:"]"};
+                break;
+
         
             default:
                 break;
@@ -1778,12 +1842,49 @@ function parseNumberExp(lexer)
     }
 }
 
+function tableConstructorExp(line, lastLine, keyExps, valExps)
+{
+    let i = {};
+
+    i.type = "TableConstructorExp";
+
+    i.line = line;
+    i.lastLine = lastLine;
+    i.keyExps = keyExps;
+    i.valExps = valExps;
+
+    return i;
+}
+
+//暂时不支持初始化
+function _parseFildList(lexer)
+{
+    let ks = [], vs = [];
+    return {ks, vs};
+}
+
+function parseTableConstructorExp(lexer)
+{
+    let line = lexer.line;
+    lexer.nextTokenOfKind(TOKEN_SEP_LCURLY);//确保是{
+    let exps = _parseFildList(lexer);
+    lexer.nextTokenOfKind(TOKEN_SEP_RCURLY);//却表是}
+    let lastLine = lexer.line;
+
+    return tableConstructorExp(line, lastLine, exps.keyExps, exps.valExps);
+}
+
 function primary(lexer) 
 {
-    //只支持标识符和数字
-    switch (lexer.lookAhead()) {
+    //只支持标识符和数字，表
+    switch (lexer.lookAhead()) 
+    {
         case TOKEN_NUMBER:
             return parseNumberExp(lexer);//数字
+            break;
+
+        case TOKEN_SEP_LCURLY:
+            return parseTableConstructorExp(lexer);
             break;
 
         default:
@@ -1842,7 +1943,7 @@ function term(lexer)
 }
 
 //解析表达式
-//暂时只支持加法
+//暂时只支持加法,等于判断，表
 function parseExp(lexer)
 {
     return term(lexer);
@@ -1972,6 +2073,13 @@ function _finishPrefixExp(lexer, exp)
 
             let keyExp = stringExp(ident.line, ident.token);
             exp = tableAccessExp(ident.line, exp, keyExp);
+            break;
+
+        case TOKEN_SEP_LBRACK://[]
+            lexer.nextToken();//跳过[
+            let keyExp_ = parseExp(lexer);//解析表的key
+            lexer.nextTokenOfKind(TOKEN_SEP_RBRACK);//确保是]
+            exp = tableAccessExp(lexer.line, exp, keyExp_);
             break;
     
         default:
@@ -2359,6 +2467,8 @@ function newFuncInfo(parent, fd)
 
         i.constants.set(k, idx);
 
+        console.log("i.constants:", i.constants);
+
         return idx;
     }
 
@@ -2499,6 +2609,16 @@ function newFuncInfo(parent, fd)
     i.emitGetTable = function(a, b, c)
     {
         i.emitABC(OP_GETTABLE, a, b, c);
+    }
+
+    i.emitNewTable = function(a, nArr, nRec)
+    {
+        i.emitABC(OP_NEWTABLE, a, int2fb(nArr), int2fb(nRec));
+    }
+
+    i.emitSetTable = function(a, b, c)
+    {
+        i.emitABC(OP_SETTABLE, a, b, c)
     }
 
     ////////////////////////////////
@@ -2827,6 +2947,50 @@ function cgTableAccessExp(fi, node, a)
     fi.freeRegs(2);
 }
 
+function int2fb(x)
+{
+    let e = 0;
+
+    if (x < 8)
+    {
+        return x;
+    }
+
+    while(x >= (8 << 4))
+    {
+        x = (x + 0xf) >> 4;
+        e += 4;
+    }
+
+    while(x >= (8 << 1))
+    {
+        x = (x + 1) >> 1;
+        e++;
+    }
+
+    return ((e + 1) << 3) | (x - 8);
+}
+
+function fb2int(x)
+{
+    if (x < 8)
+    {
+        return x;
+    }
+    else
+    {
+        return ((x & 7) + 8) << (((x & 0xff) >> 3) - 1);
+    }
+}
+
+
+
+function cgTableConstructorExp(fi, node, a)
+{
+    //暂时只支持0初始表达式
+    fi.emitNewTable(a, 0, 0);
+}
+
 //解析表达式
 function cgExp(fi, exp, a, n)
 {
@@ -2865,6 +3029,10 @@ function cgExp(fi, exp, a, n)
 
         case "FuncDefExp":
 		    cgFuncDefExp(fi, exp, a);
+            break;
+
+        case "TableConstructorExp":
+            cgTableConstructorExp(fi, exp, a);
             break;
 
         default:
@@ -2936,9 +3104,31 @@ function cgAssignStat(fi, node)
 
     let a = fi.allocReg();
     cgExp(fi, func, a, 1);//处理FuncDefExp类型，生成closure语句||
-    fi.freeReg();         //处理数字类型，生成loadk指令
+    //fi.freeReg();         //处理数字类型，生成loadk指令
 
-    //手动调用，否则无法绑定全局表
+
+    if (var_.type == "TableAccessExp")
+    {
+        //如果是表访问表达式
+        let t = fi.allocReg();
+        cgExp(fi, var_.prefixExp, t, 1);//得到表变量
+
+        let k = fi.allocReg();
+        cgExp(fi, var_.keyExp, k, 1);//得到键
+
+        //设置表t的k键值为func的值
+        fi.emitSetTable(t, k, a);
+
+        fi.freeReg();
+        fi.freeReg();
+        fi.freeReg();
+        return;
+    }
+    
+    ///////////////////////////////////////////////////////
+    //常规全局变量
+    // //手动调用，否则无法绑定全局表
+    fi.freeReg(); 
     let upvalueIdx = fi.indexOfUpval("_ENV");
 
     //生成settapup语句
@@ -2947,6 +3137,7 @@ function cgAssignStat(fi, node)
     index |= 0x100;//转换为常量表索引
 
     fi.emitSetTabUp(upvalueIdx, index, a);
+    ///////////////////////////////////////////////////////
 }
 
 function cgLocalVarDeclStat(fi, node)
