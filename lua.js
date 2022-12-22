@@ -1957,6 +1957,17 @@ function _isFieldSep(tokenKind)
 
 function _parseField(lexer)
 {
+    if (lexer.lookAhead() == TOKEN_SEP_LBRACK)//如果是[]
+    {
+        lexer.nextToken();//跳过[
+        let k = parseExp(lexer);
+        lexer.nextTokenOfKind(TOKEN_SEP_RBRACK);//确保是]
+        lexer.nextTokenOfKind(TOKEN_OP_ASSIGN);//确保是=
+        let v = parseExp(lexer);
+
+        return {k, v};
+    }
+
     let exp = parseExp(lexer);
 
     if (exp.type == "NameExp")

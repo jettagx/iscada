@@ -1,4 +1,3 @@
-a = {"Monday",{x=0,y=1}, "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
-b = {"Monday", x = 12, "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", k = "hi"}
-print(a[2].x)
-print(b[2])
+a = {"Monday",["a"]={x=1}, [2]={y=2},"Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+print(a["a"].x)
+print(a[2])
