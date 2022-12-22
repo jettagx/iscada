@@ -1882,10 +1882,57 @@ function tableConstructorExp(line, lastLine, keyExps, valExps)
     return i;
 }
 
-//暂时不支持初始化
+function _isFieldSep(tokenKind)
+{
+    return tokenKind == TOKEN_SEP_COMMA;//如果是逗号，返回真
+}
+
+function _parseField(lexer)
+{
+    let exp = parseExp(lexer);
+
+    if (exp.type == "NameExp")
+    {
+        if (lexer.lookAhead() == TOKEN_OP_ASSIGN)
+        {
+            lexer.nextToken();//跳过=
+
+            let k = stringExp(exp.line , exp.name);
+            let v = parseExp(lexer);
+
+            return {k, v};
+        }
+    }
+    else
+    {
+        throw "_parseField error";
+    }
+}
+
 function _parseFildList(lexer)
 {
     let ks = [], vs = [];
+    if (lexer.lookAhead() != TOKEN_SEP_RCURLY)//不为空
+    {
+        let kv = _parseField(lexer);
+        ks.push(kv.k);
+        vs.push(kv.v);
+
+        while(_isFieldSep(lexer.lookAhead()))//如果是，
+        {
+            lexer.nextToken();//跳过token
+            if (lexer.lookAhead() != TOKEN_SEP_RCURLY)
+            {
+                let kv = _parseField(lexer);
+                ks.push(kv.k);
+                vs.push(kv.v);
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
     return {keyExps:ks, valExps:vs};
 }
 
@@ -3015,12 +3062,25 @@ function fb2int(x)
     }
 }
 
-
-
 function cgTableConstructorExp(fi, node, a)
 {
-    //暂时只支持0初始表达式
     fi.emitNewTable(a, 0, 0);
+
+    for (let i = 0; i < node.keyExps.length; i++)
+    {
+        let keyExp = node.keyExps[i];//取出值,为stringExp类型
+        let valExp = node.valExps[i];//取出值
+
+        let b = fi.allocReg();
+        cgExp(fi, keyExp, b, 1);
+
+        let c = fi.allocReg();
+        cgExp(fi, valExp, c, 1);
+
+        fi.freeRegs(2);
+
+        fi.emitSetTable(a, b, c);
+    }
 }
 
 //解析表达式
