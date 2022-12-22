@@ -323,6 +323,8 @@ const OP_NEWTABLE = 0x0b;
 
 const OP_SETTABLE = 0x0a;
 
+const OP_SETLIST = 0x2b;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -347,6 +349,8 @@ opCodes[OP_GETTABLE] = getOpInfo(0, 1, OpArgR, OpArgK, IABC, "GETTABLE", _getTab
 opCodes[OP_NEWTABLE] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "NEWTABLE", _newTable);
 
 opCodes[OP_SETTABLE] = getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABLE", _setTable);
+
+opCodes[OP_SETLIST] = getOpInfo(0, 0, OpArgU, OpArgU, IABC, "SETLIST", _setlist);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -621,6 +625,34 @@ function _setTable(inst, ls)
     ls.getRK(b);
     ls.getRK(c);
     ls.setTable_(a);
+}
+
+const LFIELDS_PER_FLUSH = 50;
+
+function _setlist(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b;
+    let c = i.c;
+
+    if (c > 0)
+    {
+        c--;
+    }
+    else
+    {
+        throw "_setlist error";
+    }
+
+    let idx = c * LFIELDS_PER_FLUSH;
+
+    for (let j = 1; j <= b; j++)
+    {
+        idx++;
+        ls.pushValue(a + j);
+        ls.setI(a, idx);
+    }
 }
 
 function _compare(inst, ls, op)
@@ -943,21 +975,50 @@ function newLuaStack(size, state)
 const LUA_RIDX_GLOBALS = 2;
 const LUA_MINSTACK = 20;
 
-//创建表格对象,暂时只考虑map情况
+//创建表格对象
 function newLuaTable(nArr, nRec)
 {
     let i = {};
 
+    i.arr = new Array(nArr);
     i._map = new Map();
 
     i.put = function (key, val)
     {
-        //将值写入map
+        if (typeof(key) === 'number')
+        {
+            if (key >= 1)
+            {
+                if (key <= nArr)
+                {
+                    i.arr[key-1] = val;//如果在数组的范围内，直接写
+                    return;
+                }
+
+                if (key == i.arr.length + 1)
+                {
+                    //如果map中有该项，则删除，没有，也删除，不会有什么影响
+                    i._map.delete(key);
+
+                    i.arr.push(val);//如果大小比数组大1，加到数组的尾部
+                }
+            }
+        }
+
         i._map.set(key, val);
     };
 
     i.get = function(key)
     {
+         //如果key是整数，且在数组的范围内，则访问数组，反之访问map
+        if (typeof(key) === 'number')
+        {
+            if (key >= 1 && key <= i.arr.length)
+            {
+                return i.arr[key - 1];
+            }
+        }
+
         return i._map.get(key);
     };
 
@@ -1333,10 +1394,17 @@ function newLuaState()
         ls.stack.push(null);
     }
 
-    ls.createTable  =function(nArr, nRec)
+    ls.createTable = function(nArr, nRec)
     {
         let t = newLuaTable(nArr, nRec);
 	    ls.stack.push(t);
+    }
+
+    ls.setI = function(idx, i)
+    {
+        let t = ls.stack.get(idx);
+        let v = ls.stack.pop();
+        ls.setTable(t, i, v);
     }
 
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
@@ -1903,10 +1971,8 @@ function _parseField(lexer)
             return {k, v};
         }
     }
-    else
-    {
-        throw "_parseField error";
-    }
+    
+    return {k:null, v:exp}; 
 }
 
 function _parseFildList(lexer)
@@ -2700,6 +2766,11 @@ function newFuncInfo(parent, fd)
         i.emitABC(OP_SETTABLE, a, b, c)
     }
 
+    i.emitSetList = function(a, b, c)
+    {
+        i.emitABC(OP_SETLIST, a, b, c);
+    }
+
     ////////////////////////////////
     //创建Upvalues
     i.getUpvalues = function()
@@ -3064,13 +3135,54 @@ function fb2int(x)
 
 function cgTableConstructorExp(fi, node, a)
 {
-    fi.emitNewTable(a, 0, 0);
+    let nArr = 0;
+    for (let i = 0; i < node.keyExps.length; i++)
+    {
+        if (node.keyExps[i] == null)
+        {
+            nArr++;//计算有多少项要保存到数组中
+        }
+    }
+
+    fi.emitNewTable(a, nArr, node.keyExps.length - nArr);//nArr保存到数组中，剩下用map实现
+
+    let arrIdx = 0;
 
     for (let i = 0; i < node.keyExps.length; i++)
     {
         let keyExp = node.keyExps[i];//取出值,为stringExp类型
         let valExp = node.valExps[i];//取出值
 
+
+        if (keyExp == null)
+        {
+            //只有value，没有key
+            //保存在数组中
+            arrIdx++;
+
+            let tmp = fi.allocReg();
+            cgExp(fi, valExp, tmp, 1);//表达式求值
+
+            if (arrIdx % 50 == 0 || arrIdx == nArr) 
+            {
+                //如果大于50，每50次处理一次，如果小于50，按实际次数处理
+				let n = arrIdx % 50;
+
+				if (n == 0) 
+                {
+					n = 50;
+				}
+
+				fi.freeRegs(n);
+
+				let c = (arrIdx-1)/50 + 1;
+
+				fi.emitSetList(a, n, c);
+			}
+            continue;
+        }
+
+        //key:value类型
         let b = fi.allocReg();
         cgExp(fi, keyExp, b, 1);
 

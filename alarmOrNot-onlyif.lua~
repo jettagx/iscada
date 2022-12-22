@@ -1,7 +1,4 @@
-a = {x = 100, y = 200}
-a[a]= 0
-a[1] = 1
-print(a.a)
-print(a[1])
-print(a.x)
-print(a.y)
+a = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+b = {"Monday", x = 12, "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", k = "hi"}
+print(a[0])
+print(b[2])
