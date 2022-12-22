@@ -2206,32 +2206,33 @@ function _finishFuncCallExp(lexer, prefixExp)
 
 function _finishPrefixExp(lexer, exp)
 {
-    switch (lexer.lookAhead()) {
-        case TOKEN_SEP_LPAREN:
-            exp = _finishFuncCallExp(lexer, exp);
-            break;
-
-        case TOKEN_SEP_DOT:
-            //console.log("TOKEN_SEP_DOT");
-            lexer.nextToken();//跳过.
-            let ident = lexer.nextIdentifier();
-
-            let keyExp = stringExp(ident.line, ident.token);
-            exp = tableAccessExp(ident.line, exp, keyExp);
-            break;
-
-        case TOKEN_SEP_LBRACK://[]
-            lexer.nextToken();//跳过[
-            let keyExp_ = parseExp(lexer);//解析表的key
-            lexer.nextTokenOfKind(TOKEN_SEP_RBRACK);//确保是]
-            exp = tableAccessExp(lexer.line, exp, keyExp_);
-            break;
+    while(1)
+    {
+        switch (lexer.lookAhead()) {
+            case TOKEN_SEP_LPAREN:
+                exp = _finishFuncCallExp(lexer, exp);
+                break;
     
-        default:
-            break;
+            case TOKEN_SEP_DOT:
+                //console.log("TOKEN_SEP_DOT");
+                lexer.nextToken();//跳过.
+                let ident = lexer.nextIdentifier();
+    
+                let keyExp = stringExp(ident.line, ident.token);
+                exp = tableAccessExp(ident.line, exp, keyExp);
+                break;
+    
+            case TOKEN_SEP_LBRACK://[]
+                lexer.nextToken();//跳过[
+                let keyExp_ = parseExp(lexer);//解析表的key
+                lexer.nextTokenOfKind(TOKEN_SEP_RBRACK);//确保是]
+                exp = tableAccessExp(lexer.line, exp, keyExp_);
+                break;
+        
+            default:
+                return exp;
+        }
     }
-
-    return exp;
 }
 
 function parseParensExp(lexer)
