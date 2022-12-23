@@ -310,6 +310,9 @@ const OP_CLOSURE = 0x2c;
 const OP_SETTABUP = 0x08;
 const OP_EQ = 0x1f;
 
+const OP_LE = 0x21;
+const OP_LT = 0x20;
+
 const OP_LOADBOOL = 0x3;
 const OP_MOVE = 0x0;
 
@@ -358,6 +361,11 @@ opCodes[OP_SETLIST] = getOpInfo(0, 0, OpArgU, OpArgU, IABC, "SETLIST", _setlist)
 
 opCodes[OP_FORPREP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "FORPREP", _forprep);
 opCodes[OP_FORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "FORLOOP", _forloop);
+
+opCodes[OP_FORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "FORLOOP", _forloop);
+
+opCodes[OP_LE] = getOpInfo(1, 0, OpArgK, OpArgK, IABC, "LE", _le);
+opCodes[OP_LT] = getOpInfo(1, 0, OpArgK, OpArgK, IABC, "LT", _lt);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -543,8 +551,9 @@ function _settabup(inst, ls)
     ls.setTable_(luaUpvalueIndex(a));
 }
 
-const LUA_OPEQ = 0;
-const LUA_OPLE = 1;
+const LUA_OPEQ = 0;//==
+const LUA_OPLE = 1;//<=
+const LUA_OPLT = 2;//<
 
 function _eq(inst, ls)
 {
@@ -694,6 +703,16 @@ function _forloop(inst, ls)
         ls.addPC(sbx);
         ls.copy(a, a+3);
     }
+}
+
+function _le(inst, ls)
+{
+    _compare(inst, ls, LUA_OPLE);
+}
+
+function _lt(inst, ls)
+{
+    _compare(inst, ls, LUA_OPLT);
 }
 
 function _compare(inst, ls, op)
@@ -1118,7 +1137,7 @@ function newLuaState()
         let a = ls.stack.get(idx1);
         let b = ls.stack.get(idx2);
 
-        //暂时只支持==和<=
+        //暂时只支持==和<=和<
         if (op == LUA_OPEQ)
         {
             return (a == b);
@@ -1126,6 +1145,10 @@ function newLuaState()
         else if (op == LUA_OPLE)
         {
             return (a <= b);
+        }
+        else if (op == LUA_OPLT)
+        {
+            return (a < b);
         }
         else
         {
@@ -1563,6 +1586,10 @@ const TOKEN_STRING = 21;//"内容"或者'内容'
 const TOKEN_KW_FOR = 22;//for
 const TOKEN_KW_DO = 23;//do
 
+const TOKEN_KW_WHILE = 24;//while
+const TOKEN_OP_LE = 25;//<=
+const TOKEN_OP_LT = 26;//<
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1575,6 +1602,8 @@ keywords.set("return", TOKEN_KW_RETURN);
 
 keywords.set("for", TOKEN_KW_FOR);
 keywords.set("do", TOKEN_KW_DO);
+
+keywords.set("while", TOKEN_KW_WHILE);
 
 function newLexer(chunk, chunkName)
 {
@@ -1821,6 +1850,20 @@ function newLexer(chunk, chunkName)
             case '\'':
             case '"' :
                 return {line, kind:TOKEN_STRING, token:i.scanShortString()}; ;
+                break;
+
+            case '<':
+                if ((count + 1 != chunk.length) && (chunk[count + 1] == '=')) 
+                {
+                    i.next(2);
+                    return {line, kind:TOKEN_OP_LE, token:"<="};
+                } 
+                else 
+                {
+                    i.next(1);
+                    return {line, kind:TOKEN_OP_LT, token:"<"};
+                }
+                
                 break;
 
             default:
@@ -2145,6 +2188,8 @@ function term(lexer)
         switch (lexer.lookAhead()) 
         {
             case TOKEN_OP_EQ:
+            case TOKEN_OP_LE:
+            case TOKEN_OP_LT:
                 let i = lexer.nextToken();
                 let line = i.line;
                 let op = i.kind;
@@ -2552,7 +2597,7 @@ function _finishForNumStat(lexer, lineOfFor, varName)
     return forNumStat(lineOfFor, doToken.line, varName, initExp, limitExp, stepExp, block);
 }
 
-function parseForstat(lexer)
+function parseForStat(lexer)
 {
     let forToken = lexer.nextTokenOfKind(TOKEN_KW_FOR);//确保是for开头
     let ident = lexer.nextIdentifier();//取出循环变量
@@ -2563,8 +2608,30 @@ function parseForstat(lexer)
     }
     else
     {
-        throw "parseForstat error";
+        throw "parseForStat error";
     }
+}
+
+function whileStat(exp, block)
+{
+    let i = {};
+
+    i.type = "WhileStat";
+
+    i.exp = exp;
+    i.block = block;
+
+    return i;
+}
+
+function parseWhileStat(lexer)
+{
+    lexer.nextTokenOfKind(TOKEN_KW_WHILE);//确保是while
+	let exp = parseExp(lexer);            //解析表达式
+	lexer.nextTokenOfKind(TOKEN_KW_DO)    //确保是do
+	let block = parseBlock(lexer)            //解析循环体
+	lexer.nextTokenOfKind(TOKEN_KW_END)   //确保是end
+	return whileStat(exp, block);
 }
 
 //解析语句
@@ -2584,7 +2651,11 @@ function parseStat(lexer)
             break;
 
         case TOKEN_KW_FOR:
-            return parseForstat(lexer);
+            return parseForStat(lexer);
+            break;   
+
+        case TOKEN_KW_WHILE:
+            return parseWhileStat(lexer);
             break;   
     
         default:
@@ -2829,15 +2900,24 @@ function newFuncInfo(parent, fd)
         if (op == TOKEN_OP_ADD)
         {
             i.emitABC(OP_ADD, a, b, c);
+            return;
         }
         else if (op == TOKEN_OP_EQ)
         {
             i.emitABC(OP_EQ, 1, b, c);
-
-            i.emitJmp(0, 1);
-            i.emitLoadBool(a, 0, 1);
-            i.emitLoadBool(a, 1, 0);
         }
+        else if (op == TOKEN_OP_LE)
+        {
+            i.emitABC(OP_LE, 1, b, c);
+        }
+        else if (op == TOKEN_OP_LT)
+        {
+            i.emitABC(OP_LT, 1, b, c);
+        }
+
+        i.emitJmp(0, 1);
+        i.emitLoadBool(a, 0, 1);
+        i.emitLoadBool(a, 1, 0);
     }
 
     i.emitLoadK = function(a, k)
@@ -3544,6 +3624,28 @@ function cgForNumStat(fi, node)
     fi.exitScope();
 }
 
+function cgWhileStat(fi, node)
+{
+    let pcBeforeExp = fi.pc();
+
+    let r = fi.allocReg();
+    cgExp(fi, node.exp, r, 1);//表达式求值
+    fi.freeReg();
+
+    fi.emitTest(r, 0);//测试表达式的值
+
+    let pcJmpToEnd = fi.emitJmp(0, 0);//条件不满足跳转到while的下一条指令执行
+
+    fi.enterScope(true);
+    cgBlock(fi, node.block);
+    //fi.closeOpenUpvals()
+    fi.emitJmp(0, pcBeforeExp-fi.pc()-1);//跳回到表达式求值语句，再次计算表达式的值
+
+    fi.exitScope();
+
+    fi.fixSbx(pcJmpToEnd, fi.pc()-pcJmpToEnd);//修正pcJmpToEnd，保证跳转到while的下一条语句
+}
+
 function cgStat(fi, stat)
 {
     switch (stat.type) {
@@ -3565,6 +3667,10 @@ function cgStat(fi, stat)
 
         case "ForNumStat":
             cgForNumStat(fi, stat);
+            break;
+
+        case "WhileStat":
+            cgWhileStat(fi, stat);
             break;
 
         default:
