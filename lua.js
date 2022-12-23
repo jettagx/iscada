@@ -325,6 +325,10 @@ const OP_SETTABLE = 0x0a;
 
 const OP_SETLIST = 0x2b;
 
+const OP_FORPREP = 0x28;
+
+const OP_FORLOOP = 0x27;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -351,6 +355,9 @@ opCodes[OP_NEWTABLE] = getOpInfo(0, 1, OpArgU, OpArgU, IABC, "NEWTABLE", _newTab
 opCodes[OP_SETTABLE] = getOpInfo(0, 0, OpArgK, OpArgK, IABC, "SETTABLE", _setTable);
 
 opCodes[OP_SETLIST] = getOpInfo(0, 0, OpArgU, OpArgU, IABC, "SETLIST", _setlist);
+
+opCodes[OP_FORPREP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "FORPREP", _forprep);
+opCodes[OP_FORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "FORLOOP", _forloop);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -464,6 +471,7 @@ function _return(inst, ls)
 }
 
 const LUA_OPADD = 0;
+const LUA_OPSUB = 1;
 
 function _binaryArith(inst, ls, op)
 {
@@ -536,6 +544,7 @@ function _settabup(inst, ls)
 }
 
 const LUA_OPEQ = 0;
+const LUA_OPLE = 1;
 
 function _eq(inst, ls)
 {
@@ -652,6 +661,38 @@ function _setlist(inst, ls)
         idx++;
         ls.pushValue(a + j);
         ls.setI(a, idx);
+    }
+}
+
+function _forprep(inst, ls)
+{
+    let i = inst.asbx();
+    let a = i.a + 1;
+    let sbx = i.sbx;
+
+    ls.pushValue(a);
+    ls.pushValue(a + 2);
+    ls.arith(LUA_OPSUB);
+    ls.replace(a);
+
+    ls.addPC(sbx);
+}
+
+function _forloop(inst, ls)
+{
+    let i = inst.asbx();
+    let a = i.a + 1;
+    let sbx = i.sbx;
+
+    ls.pushValue(a+2);
+    ls.pushValue(a);
+    ls.arith(LUA_OPADD);
+    ls.replace(a);
+
+    if (ls.compare(a, a+1, LUA_OPLE))
+    {
+        ls.addPC(sbx);
+        ls.copy(a, a+3);
     }
 }
 
@@ -1077,10 +1118,14 @@ function newLuaState()
         let a = ls.stack.get(idx1);
         let b = ls.stack.get(idx2);
 
-        //暂时只支持==
+        //暂时只支持==和<=
         if (op == LUA_OPEQ)
         {
             return (a == b);
+        }
+        else if (op == LUA_OPLE)
+        {
+            return (a <= b);
         }
         else
         {
@@ -1375,12 +1420,23 @@ function newLuaState()
 
     ls.arith = function(op)
     {
-        //只处理加法指令
+        //只处理加法和减法指令
         let a,b;
         b = ls.stack.pop();
         a = ls.stack.pop();
 
-        ls.stack.push(a+b);
+        if (op == LUA_OPADD)
+        {
+            ls.stack.push(a+b);
+            return;
+        }
+        else if (op == LUA_OPSUB)
+        {
+            ls.stack.push(a-b);
+            return;
+        }
+
+        throw "ls.arith error";
     };
 
     ls.copy = function(fromIdx, toIdx)
@@ -1504,6 +1560,9 @@ const TOKEN_SEP_RBRACK = 20;//]
 
 const TOKEN_STRING = 21;//"内容"或者'内容'
 
+const TOKEN_KW_FOR = 22;//for
+const TOKEN_KW_DO = 23;//do
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1513,6 +1572,9 @@ keywords.set("end", TOKEN_KW_END);
 keywords.set("local", TOKEN_KW_LOCAL);
 
 keywords.set("return", TOKEN_KW_RETURN);
+
+keywords.set("for", TOKEN_KW_FOR);
+keywords.set("do", TOKEN_KW_DO);
 
 function newLexer(chunk, chunkName)
 {
@@ -1830,7 +1892,7 @@ function newLocalValDeclStat(lastline, nameList, expList)
     i.nameList = nameList;
     i.expList = expList;
 
-    i.type = "LocalValDeclStat";//for代码生成
+    i.type = "LocalValDeclStat";//代码生成
 
     return i;
 }
@@ -2445,6 +2507,66 @@ function parseLocalAssignOrFuncDefStat(lexer)
     }
 }
 
+function forNumStat(lineOfFor, doLine, varName, initExp, limitExp, stepExp, block)
+{
+    let i = {};
+
+    i.type = "ForNumStat";
+
+    i.lineOfFor = lineOfFor;
+    i.doLine = doLine;
+    i.varName = varName;
+    i.initExp = initExp;
+    i.limitExp = limitExp;
+    i.stepExp = stepExp;
+    i.block = block;
+
+    return i;
+}
+
+function _finishForNumStat(lexer, lineOfFor, varName)
+{
+    lexer.nextTokenOfKind(TOKEN_OP_ASSIGN) //确保是=
+
+    let initExp = parseExp(lexer);//变量的初值
+	lexer.nextTokenOfKind(TOKEN_SEP_COMMA);//确保是,
+	let limitExp = parseExp(lexer);//变量的终值
+
+    let stepExp;
+
+    if (lexer.lookAhead() == TOKEN_SEP_COMMA)
+    {
+        //如果还有','则为步距变量
+        lexer.nextToken();//跳过','
+        stepExp = parseExp(lexer);
+    }
+    else
+    {
+        stepExp = integerExp(lexer.line, 1);//步距默认为1
+    }
+
+    let doToken = lexer.nextTokenOfKind(TOKEN_KW_DO)//确保是do
+    let block = parseBlock(lexer);
+    lexer.nextTokenOfKind(TOKEN_KW_END)//确保是end
+
+    return forNumStat(lineOfFor, doToken.line, varName, initExp, limitExp, stepExp, block);
+}
+
+function parseForstat(lexer)
+{
+    let forToken = lexer.nextTokenOfKind(TOKEN_KW_FOR);//确保是for开头
+    let ident = lexer.nextIdentifier();//取出循环变量
+
+    if (lexer.lookAhead() == TOKEN_OP_ASSIGN)//如果是等号
+    {
+        return _finishForNumStat(lexer, forToken.line, ident.token);
+    }
+    else
+    {
+        throw "parseForstat error";
+    }
+}
+
 //解析语句
 function parseStat(lexer)
 {
@@ -2460,6 +2582,10 @@ function parseStat(lexer)
         case TOKEN_KW_LOCAL:
             return parseLocalAssignOrFuncDefStat(lexer); 
             break;
+
+        case TOKEN_KW_FOR:
+            return parseForstat(lexer);
+            break;   
     
         default:
 		return parseAssignOrFuncCallStat(lexer);
@@ -2783,6 +2909,17 @@ function newFuncInfo(parent, fd)
         i.emitABC(OP_SETLIST, a, b, c);
     }
 
+    i.emitForPrep = function(a, sBx)
+    {
+        i.emitAsBx(OP_FORPREP, a, sBx);
+        return i.insts.length - 1;
+    }
+
+    i.emitForLoop = function(a, sBx)
+    {
+        i.emitAsBx(OP_FORLOOP, a, sBx);
+        return i.insts.length - 1;
+    }
     ////////////////////////////////
     //创建Upvalues
     i.getUpvalues = function()
@@ -3358,27 +3495,53 @@ function cgAssignStat(fi, node)
 
 function cgLocalVarDeclStat(fi, node)
 {
-    //暂时只支持一个变量，一个表达式的情况
-    let exp = node.expList[0];
-    let name = node.nameList[0];
-
-    if (exp != undefined)
+    //现在支持多个变量了
+    for (let i = 0; i < node.nameList.length; i++)
     {
-        let a = fi.allocReg();
+        let exp = node.expList[i];
+        let name = node.nameList[i];
 
-        cgExp(fi, exp, a, 1);//生成loadK指令载入数字2
+        if (exp != undefined)
+        {
+            let a = fi.allocReg();
 
-        fi.freeReg();
-    }
-    else
-    {
-        //生成一条loadNil指令
-        let a = fi.allocReg();
-        fi.emitLoadNil(a, 1);
-        fi.freeReg();
-    }
+            cgExp(fi, exp, a, 1);//生成loadK指令载入数字2
+
+            fi.freeReg();
+        }
+        else
+        {
+            //生成一条loadNil指令
+            let a = fi.allocReg();
+            fi.emitLoadNil(a, 1);
+            fi.freeReg();
+        }
     
-    fi.addLocVar(name);//添加局部变量到局部变量表
+        fi.addLocVar(name);//添加局部变量到局部变量表
+    }
+}
+
+function cgForNumStat(fi, node)
+{
+    fi.enterScope(true);
+
+    //创建三个local变量
+    cgLocalVarDeclStat(fi, newLocalValDeclStat(0,["(for index)", "(for limit)", "(for step)"],
+                                               [node.initExp, node.limitExp, node.stepExp]));
+    
+    fi.addLocVar(node.varName);//创建for循环变量i
+
+    let a = fi.usedRegs - 4;//指向"(for index)"变量
+	let pcForPrep = fi.emitForPrep(a, 0);
+
+	cgBlock(fi, node.block);
+	//fi.closeOpenUpvals();
+	let pcForLoop = fi.emitForLoop(a, 0);
+
+	fi.fixSbx(pcForPrep, pcForLoop-pcForPrep-1);//从FORPREP指令跳转到FORLOOP指令
+	fi.fixSbx(pcForLoop, pcForPrep-pcForLoop);//从FORLOOP指令跳转到FORPREP下一条指令
+
+    fi.exitScope();
 }
 
 function cgStat(fi, stat)
@@ -3398,6 +3561,10 @@ function cgStat(fi, stat)
 
         case "LocalValDeclStat":
             cgLocalVarDeclStat(fi, stat);
+            break;
+
+        case "ForNumStat":
+            cgForNumStat(fi, stat);
             break;
 
         default:
