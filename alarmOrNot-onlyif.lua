@@ -1,7 +1,6 @@
-a = {"one", [4]="four","two", "three"}
-i = 1
-while(i <= 4)    
+t = {[1]="1","one", [4]="four","two","three","four","five", "six",x=100}
+for k,v in pairs(t) 
 do
-    print(a[i])
-    i = i + 1
-end 
+    print(k)
+    print(v)
+end

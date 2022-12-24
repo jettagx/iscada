@@ -332,6 +332,9 @@ const OP_FORPREP = 0x28;
 
 const OP_FORLOOP = 0x27;
 
+const OP_TFORCALL = 0x29;
+const OP_TFORLOOP = 0x2a;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -366,6 +369,9 @@ opCodes[OP_FORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "FORLOOP", _forloop
 
 opCodes[OP_LE] = getOpInfo(1, 0, OpArgK, OpArgK, IABC, "LE", _le);
 opCodes[OP_LT] = getOpInfo(1, 0, OpArgK, OpArgK, IABC, "LT", _lt);
+
+opCodes[OP_TFORCALL] = getOpInfo(0, 0, OpArgN, OpArgU, IABC, "TFORCALL", _tForCall);
+opCodes[OP_TFORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "TFORLOOP", _tForLoop);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -715,6 +721,30 @@ function _lt(inst, ls)
     _compare(inst, ls, LUA_OPLT);
 }
 
+function _tForCall(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let c = i.c;
+
+    _pushFuncAndArgs(a, 3, ls);
+    ls.call(2, c);
+    _popResults(a+3, c+1, ls);
+}
+
+function _tForLoop(inst, ls)
+{
+    let i = inst.asbx();
+    let a = i.a + 1;
+    let sbx = i.sbx;
+
+    if (!ls.isNil(a + 1))
+    {
+        ls.copy(a+1, a);
+        ls.addPC(sbx);
+    }
+}
+
 function _compare(inst, ls, op)
 {
     let i = inst.abc();
@@ -1042,6 +1072,54 @@ function newLuaTable(nArr, nRec)
 
     i.arr = new Array(nArr);
     i._map = new Map();
+
+    i.keys = new Map();//支持for迭代器
+
+    i.nextKey = function(key)
+    {
+        if (key == null || i.keys.size == 0)
+        {
+            //如果key为null，或者keys为0，执行这
+            i.initKeys();//收集key之间的关系
+        }
+
+        if (i.keys.get(key) == undefined)
+        {
+            return null;
+        }
+
+        return i.keys.get(key);//返回key的下一个key
+    }
+
+    i.initKeys = function()
+    {
+        //收集key之间的关系
+        let key = null;
+
+        //收集数组
+        for (let j = 0; j < i.arr.length; j++)
+        {
+            let v = i.arr[j];
+
+            if (v != undefined || v != null)
+            {
+                i.keys.set(key, j+1);
+                key = j + 1;
+            }
+        }
+
+        //收集map
+        for (let item of i._map.keys())
+        {
+            let v = i._map.get(item);
+
+            if (v != undefined || v != null)
+            {
+                i.keys.set(key, item);
+                key = item;
+            }
+        }
+    }
 
     i.put = function (key, val)
     {
@@ -1486,6 +1564,56 @@ function newLuaState()
         ls.setTable(t, i, v);
     }
 
+    ls.setTop = function(idx)
+    {
+        let newTop = ls.stack.absIndex(idx);
+
+        if (newTop < 0)
+        {
+            throw "stack underflow!";
+        }
+
+        let n = ls.stack.top - newTop;
+
+        if (n > 0)
+        {
+            for (let i = 0; i < n; i++)
+            {
+                ls.stack.pop();//弹出多余的
+            }
+        }
+        else if (n < 0)
+        {
+            for (let i = 0; i > n; i--)
+            {
+                ls.stack.push(null);//压入null
+            }
+        }
+    }
+
+    ls.next = function(idx)
+    {
+        let table = ls.stack.get(idx);//得到表
+        let key = ls.stack.pop();//得到表的key
+
+        let nextKay;
+        
+        if ((nextKay = table.nextKey(key)) != null)
+        {
+            ls.stack.push(nextKay);//得到key
+            ls.stack.push(table.get(nextKay));//得到value
+
+            return true;
+        }
+
+        return false;
+    }
+
+    ls.isNil = function(idx)
+    {
+        return ls.stack.get(idx) == null;
+    }
+
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
 
     return ls;
@@ -1500,6 +1628,29 @@ function print(ls)
     console.log("Jsprint:",ls.stack.pop());
     
     return 0;
+}
+
+function pairs(ls)
+{
+    ls.pushJsFunction(next);//next函数
+    ls.pushValue(1);//表t
+    ls.pushNil();//初始key
+    return 3;
+}
+
+function next(ls)
+{
+    ls.setTop(2);//确保栈的大小是2，保证ls.next函数有两个参数
+
+    if (ls.next(1))
+    {
+        return 2;//key和vaule已经在栈顶
+    }
+    else
+    {
+        ls.pushNil();//栈顶是null
+        return 1;
+    }
 }
 
 function setValue(ls)
@@ -1590,6 +1741,8 @@ const TOKEN_KW_WHILE = 24;//while
 const TOKEN_OP_LE = 25;//<=
 const TOKEN_OP_LT = 26;//<
 
+const TOKEN_KW_IN = 27;//in
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1604,6 +1757,8 @@ keywords.set("for", TOKEN_KW_FOR);
 keywords.set("do", TOKEN_KW_DO);
 
 keywords.set("while", TOKEN_KW_WHILE);
+
+keywords.set("in", TOKEN_KW_IN);
 
 function newLexer(chunk, chunkName)
 {
@@ -2597,6 +2752,54 @@ function _finishForNumStat(lexer, lineOfFor, varName)
     return forNumStat(lineOfFor, doToken.line, varName, initExp, limitExp, stepExp, block);
 }
 
+function forInStat(line, nameList, expList, block)
+{
+    let i = {};
+
+    i.type = "ForInStat";
+
+    i.line = line;
+    i.nameList = nameList;
+    i.expList = expList;
+    i.block = block;
+
+    return i;
+}
+
+function _finishNameList(lexer, name0)
+{
+    let names = [];
+
+    names.push(name0);
+
+    while (lexer.lookAhead() == TOKEN_SEP_COMMA)
+    {
+        lexer.nextToken();//跳过','
+
+        let ident = lexer.nextIdentifier();
+        names.push(ident.token);
+    }
+
+    return names;
+}
+
+function _finishForInStat(lexer, name0)
+{
+    let nameList = _finishNameList(lexer, name0);//解析name列表
+
+    lexer.nextTokenOfKind(TOKEN_KW_IN);//确保是关键字in
+
+    let expList = parseExpList(lexer);//解析表达式列表
+
+    let do_ = lexer.nextTokenOfKind(TOKEN_KW_DO);//确保是do
+
+    let block = parseBlock(lexer);
+    
+    lexer.nextTokenOfKind(TOKEN_KW_END);//确保是end
+
+    return forInStat(do_.line, nameList, expList, block);
+}
+
 function parseForStat(lexer)
 {
     let forToken = lexer.nextTokenOfKind(TOKEN_KW_FOR);//确保是for开头
@@ -2608,7 +2811,7 @@ function parseForStat(lexer)
     }
     else
     {
-        throw "parseForStat error";
+        return _finishForInStat(lexer, ident.token);//处理通用for循环
     }
 }
 
@@ -2786,6 +2989,22 @@ function newFuncInfo(parent, fd)
         }
 
         return i.usedRegs - 1;
+    }
+
+    //分配多个寄存器
+    i.allocRegs = function(n)
+    {
+        if (n <= 0)
+        {   
+            throw "i.allocRegs n <= 0";
+        }
+
+        for (let j = 0; j < n; j++)
+        {
+            i.allocReg();
+        }
+
+        return i.usedRegs - n;
     }
 
     //释放一个寄存器
@@ -3000,6 +3219,19 @@ function newFuncInfo(parent, fd)
         i.emitAsBx(OP_FORLOOP, a, sBx);
         return i.insts.length - 1;
     }
+
+    i.emitTForCall = function(a, c)
+    {
+        i.emitABC(OP_TFORCALL, a, 0, c);
+    }
+
+    i.emitTForLoop = function(a, sbx)
+    {
+        i.emitAsBx(OP_TFORLOOP, a, sbx);
+    }
+
+
+
     ////////////////////////////////
     //创建Upvalues
     i.getUpvalues = function()
@@ -3576,28 +3808,59 @@ function cgAssignStat(fi, node)
 function cgLocalVarDeclStat(fi, node)
 {
     //现在支持多个变量了
-    for (let i = 0; i < node.nameList.length; i++)
+    let nameLength = node.nameList.length;
+    let expLength = node.expList.length;
+
+    if (nameLength == expLength)
     {
-        let exp = node.expList[i];
-        let name = node.nameList[i];
-
-        if (exp != undefined)
+        for (let i = 0; i < node.nameList.length; i++)
         {
-            let a = fi.allocReg();
-
-            cgExp(fi, exp, a, 1);//生成loadK指令载入数字2
-
-            fi.freeReg();
-        }
-        else
-        {
-            //生成一条loadNil指令
-            let a = fi.allocReg();
-            fi.emitLoadNil(a, 1);
-            fi.freeReg();
-        }
+            let exp = node.expList[i];
+            let name = node.nameList[i];
     
-        fi.addLocVar(name);//添加局部变量到局部变量表
+            if (exp != undefined)
+            {
+                let a = fi.allocReg();
+    
+                cgExp(fi, exp, a, 1);//生成loadK指令载入数字2
+    
+                fi.freeReg();
+            }
+            else
+            {
+                //生成一条loadNil指令
+                let a = fi.allocReg();
+                fi.emitLoadNil(a, 1);
+                fi.freeReg();
+            }
+        
+            fi.addLocVar(name);//添加局部变量到局部变量表
+        }
+    }
+    else if (nameLength > expLength)
+    {
+        //name长为3，exp长为1
+        //求出exp的返回值并赋值给name
+        let exp = node.expList[0];
+
+        let a = fi.allocReg();//分配一个变量
+
+        let n = nameLength - expLength + 1;//返回3个变量
+        cgExp(fi, exp, a, n);
+
+        fi.allocRegs(n-1);//再分配3-1=2个变量
+
+        fi.freeRegs(n);
+
+        for (let i = 0; i < node.nameList.length; i++)
+        {
+            let name = node.nameList[i];
+            fi.addLocVar(name);
+        }
+    }
+    else
+    {
+        throw "cgLocalVarDeclStat error";
     }
 }
 
@@ -3646,6 +3909,36 @@ function cgWhileStat(fi, node)
     fi.fixSbx(pcJmpToEnd, fi.pc()-pcJmpToEnd);//修正pcJmpToEnd，保证跳转到while的下一条语句
 }
 
+function cgForInStat(fi, node)
+{
+    fi.enterScope(true);
+
+    cgLocalVarDeclStat(fi, newLocalValDeclStat(0,
+		["(for generator)", "(for state)", "(for control)"],
+		node.expList)
+	);//定义三个局部变量，expList为一个函数表达式，返回三个变量
+
+     for (let i = 0; i < node.nameList.length; i++)
+     {
+        let name = node.nameList[i];
+        fi.addLocVar(name);//生成局部变量
+     }
+
+     let pcJmpToTFC = fi.emitJmp(0, 0);//跳转到TFORCALL指令处执行
+
+     cgBlock(fi, node.block);
+
+     //fi.closeOpenUpvals()
+
+     fi.fixSbx(pcJmpToTFC, fi.pc()-pcJmpToTFC);
+
+     let rGenerator = fi.slotOfLocVar("(for generator)");
+     fi.emitTForCall(rGenerator, node.nameList.length);//生成TFORCALL指令
+     fi.emitTForLoop(rGenerator+2, pcJmpToTFC-fi.pc()-1);//生成TFORLOOP指令
+
+     fi.exitScope();
+}
+
 function cgStat(fi, stat)
 {
     switch (stat.type) {
@@ -3671,6 +3964,10 @@ function cgStat(fi, stat)
 
         case "WhileStat":
             cgWhileStat(fi, stat);
+            break;
+
+        case "ForInStat":
+            cgForInStat(fi, stat);
             break;
 
         default:
@@ -3782,6 +4079,9 @@ function lexerTokens()
 
         ls.register("setValue", setValue);//注册setValue函数
         ls.register("print", print);//注册print函数
+
+        ls.register("next", next);//注册next函数
+        ls.register("pairs", pairs);//注册pairs函数
 
         let button = '{"type":"button","name":"buttonAlarm","device_id":[1],"variable":[4],"value":[0],"x":120,"y":0}';
 
