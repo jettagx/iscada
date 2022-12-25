@@ -335,6 +335,8 @@ const OP_FORLOOP = 0x27;
 const OP_TFORCALL = 0x29;
 const OP_TFORLOOP = 0x2a;
 
+const OP_SETUPVAL = 0x09;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -372,6 +374,8 @@ opCodes[OP_LT] = getOpInfo(1, 0, OpArgK, OpArgK, IABC, "LT", _lt);
 
 opCodes[OP_TFORCALL] = getOpInfo(0, 0, OpArgN, OpArgU, IABC, "TFORCALL", _tForCall);
 opCodes[OP_TFORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "TFORLOOP", _tForLoop);
+
+opCodes[OP_SETUPVAL] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "SETUPVAL", _setUpVal);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -482,6 +486,9 @@ function _return(inst, ls)
     {
         throw "_return error";
     }
+
+    //关闭局部变量
+
 }
 
 const LUA_OPADD = 0;
@@ -528,7 +535,7 @@ function _jmp(inst, ls)
     ls.addPC(sbx);
     if (a != 0)
     {
-        throw "jmp error";
+        ls.closeUpvalues(a);
     }
 }
 
@@ -743,6 +750,15 @@ function _tForLoop(inst, ls)
         ls.copy(a+1, a);
         ls.addPC(sbx);
     }
+}
+
+function _setUpVal(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b + 1;
+
+    ls.copy(a, luaUpvalueIndex(b));
 }
 
 function _compare(inst, ls, op)
@@ -971,7 +987,7 @@ function newLuaStack(size, state)
 
     t.absIndex = function(idx)
     {
-        if (idx >= 0)
+        if (idx >= 0 || idx <= LUA_REGISTRYINDEX)
         {
             return idx;
         }
@@ -1014,7 +1030,28 @@ function newLuaStack(size, state)
 
     t.set = function(idx, val)
     {
-        //LUA_REGISTRYINDEX相关先不处理
+        //LUA_REGISTRYINDEX相关
+        if (idx < LUA_REGISTRYINDEX) 
+        {   /* upvalues */
+            let uvIdx = LUA_REGISTRYINDEX - idx - 1;
+
+            let c = t.closure;
+
+            if (c != null && uvIdx < c.upvals.length) 
+            {
+                c.upvals[uvIdx] = val;
+            }
+
+            return;
+	    }
+
+        if (idx == LUA_REGISTRYINDEX) 
+        {
+            t.state.registry = val;
+            return
+        }
+
+
         let absIdx = t.absIndex(idx);
         if (absIdx > 0 && absIdx <= t.top)
         {
@@ -1241,6 +1278,11 @@ function newLuaState()
 
         let closure = newLuaClosure(subProto);
 
+        //let stack = ls.stack;
+        //ls.stack.openuvs = new Map();
+        //ls.stack.closureCopy = closure;
+        //ls.stack.item2i = new Map();
+
         //console.log("ls.loadProto",subProto.Upvalues)
         ls.stack.push(closure);
 
@@ -1251,8 +1293,11 @@ function newLuaState()
 
             if (subProto.Upvalues[i].Instack == 1)
             {
-                //throw "loadProto unsupport";
-                closure.upvals[i] = ls.stack.slots[uvIdx];//支持绑定局部变量
+                //closure.upvals[i] = ls.stack.slots[uvIdx];//支持绑定局部变量
+                //ls.stack.openuvs.set(uvIdx, ls.stack.slots[uvIdx]);//用openuvs记录变量
+                closure.upvals[i] = ls.stack.slots[uvIdx];
+
+                //ls.stack.item2i.set(uvIdx,i);
             }
             else
             {
@@ -1614,6 +1659,44 @@ function newLuaState()
         return ls.stack.get(idx) == null;
     }
 
+
+    function deepCopy(obj) 
+    {
+        var copy = Object.create(Object.getPrototypeOf(obj));
+
+        var propNames = Object.getOwnPropertyNames(obj);
+    
+        propNames.forEach(function(name) 
+        {
+            var desc = Object.getOwnPropertyDescriptor(obj, name);
+            Object.defineProperty(copy, name, desc);
+        });
+    
+        return copy;
+    }
+
+    ls.closeUpvalues = function(a)
+    {
+        let closureCopy = ls.stack.closureCopy;
+        let item2i = ls.stack.item2i;//记录item和i的map
+        let openuvs = ls.stack.openuvs;
+
+        // if (closureCopy != undefined)
+        // {
+        //     for (let item of openuvs.keys())
+        //     {
+        //         if (item >= a-1)
+        //         {
+        //             let openuv = (openuvs.get(item));//openuv指向lua栈上的局部变量的深拷贝
+                
+        //             closureCopy.upvals[item2i.get(item)] = openuv;//将值重新赋值给upvals
+    
+        //             openuvs.delete(item);
+        //         }
+        //     }
+        // }
+    }
+
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
 
     return ls;
@@ -1884,12 +1967,13 @@ function newLexer(chunk, chunkName)
     i.scanIdentifier = function()
     {
         //返回扫描得到的标识符
-        //只支持字母表示的标识符
+        //只支持字母,下划线和数字表示的标识符
         let identifier;
         let countStart = count;
 
         while((chunk[count] >= 'a' && chunk[count] <= 'z') || 
-        (chunk[count] >= 'A' && chunk[count] <= 'Z') || (chunk[count] == '_'))
+        (chunk[count] >= 'A' && chunk[count] <= 'Z') || (chunk[count] == '_') ||
+        (i.isDigit(chunk[count])))
         {
             i.next(1);
         }
@@ -2286,7 +2370,7 @@ function parseTableConstructorExp(lexer)
 
 function primary(lexer) 
 {
-    //只支持标识符和数字，表
+    //只支持标识符和数字,表,函数
     switch (lexer.lookAhead()) 
     {
         case TOKEN_NUMBER:
@@ -2300,8 +2384,12 @@ function primary(lexer)
         case TOKEN_STRING:
             let token_ = lexer.nextToken();
             return stringExp(token_.line, token_.token);
-            return ;
             break
+
+        case TOKEN_KW_FUNCTION:
+            lexer.nextToken();
+            return parseFuncDefExp(lexer);
+            break;
 
         default:
             break;
@@ -3230,7 +3318,10 @@ function newFuncInfo(parent, fd)
         i.emitAsBx(OP_TFORLOOP, a, sbx);
     }
 
-
+    i.emitSetUpval = function(a, b)
+    {
+        i.emitABC(OP_SETUPVAL, a, b, 0);
+    }
 
     ////////////////////////////////
     //创建Upvalues
@@ -3399,6 +3490,57 @@ function newFuncInfo(parent, fd)
         }
     }
 
+    i.getJmpArgA = function()
+    {
+        let hasCapturedLocVars = false;//假设没有局部变量被捕获
+        let minSlotOfLocVars = i.maxRegs;//maxRegs为最大的局部变量lua栈索引
+
+        //遍历所有变量名，找到被捕获的变量
+        for (let item of i.locNames.keys())
+        {
+            let locVar = i.locNames.get(item);
+
+            if (locVar.scopeLv == i.scopeLv)
+            {
+                for (let v = locVar;v != undefined && v.scopeLv == i.scopeLv; v = v.prev)//如果有多个同名变量
+                {
+                    if (v.captured)//如果其中有一个被捕获，则确定被捕获
+                    {
+                        hasCapturedLocVars = true;
+                    }
+
+                    if (v.slot < minSlotOfLocVars && v.name[0] != '(')
+                    {
+                        minSlotOfLocVars = v.slot;//寻找最小的slot，关闭尽量少的局部变量
+                    }
+                }
+            }
+        }
+
+        if (hasCapturedLocVars)
+        {
+            return minSlotOfLocVars + 1;
+        }
+        else
+        {
+            return 0;//无局部变量需要关闭
+        }
+    }
+
+    i.closeOpenUpvals = function()
+    {
+        //let iParent = i.parent;
+        //if (iParent != undefined || iParent != null)
+        //{
+            let a = i.getJmpArgA();
+
+            if (a > 0)
+            {
+                i.emitJmp(a, 0);
+            }
+        //}  
+    }
+
     return i;
 }
 
@@ -3408,6 +3550,7 @@ function cgRetStat(fi, retExps)
 
     if (len == 0)
     {
+        fi.closeOpenUpvals();
         fi.emitReturn(0, 0);
     }
     else if (len == 1)
@@ -3416,7 +3559,7 @@ function cgRetStat(fi, retExps)
         let r = fi.allocReg();
         cgExp(fi, retExps[0], r, 1);//1代表如果是函数调用，有1个返回值
         fi.freeReg();
-
+        fi.closeOpenUpvals();
         fi.emitReturn(r, len);//生成返回指令
     }
     else
@@ -3537,6 +3680,8 @@ function cgFuncDefExp(fi, node, a)
     }
 
     cgBlock(subFi, node.block);//生成函数内部语句;
+
+    //subFi.closeOpenUpvals();
 
     subFi.emitReturn(0, 0);//在block指令后添加return语句
 
@@ -3732,6 +3877,7 @@ function cgIfStat(fi, node)
 
         fi.enterScope(false);
         cgBlock(fi, node.blocks[i]);
+        fi.closeOpenUpvals();
         fi.exitScope();
 
         if (i < node.exps.length - 1)
@@ -3790,19 +3936,41 @@ function cgAssignStat(fi, node)
         return;
     }
 
-    ///////////////////////////////////////////////////////
-    //常规全局变量
-    // //手动调用，否则无法绑定全局表
-    fi.freeReg(); 
-    let upvalueIdx = fi.indexOfUpval("_ENV");
+    let r;
 
-    //生成settapup语句
-    //查找var_在常量表的索引
-    let index = fi.indexOfConstant(var_.name);
-    index |= 0x100;//转换为常量表索引
+    if (var_.type == "NameExp")
+    {
+        //如果是全局变量
+        if (fi.slotOfLocVar(var_.name) < 0 && fi.indexOfUpval(var_.name) < 0)
+        {
+            ///////////////////////////////////////////////////////
+            //常规全局变量
+            // //手动调用，否则无法绑定全局表
+            fi.freeReg(); 
+            let upvalueIdx = fi.indexOfUpval("_ENV");
 
-    fi.emitSetTabUp(upvalueIdx, index, a);
-    ///////////////////////////////////////////////////////
+            //生成settapup语句
+            //查找var_在常量表的索引
+            let index = fi.indexOfConstant(var_.name);
+            index |= 0x100;//转换为常量表索引
+
+            fi.emitSetTabUp(upvalueIdx, index, a);
+            ///////////////////////////////////////////////////////
+        }
+        else if ((r = fi.slotOfLocVar(var_.name)) >= 0)
+        {
+            //局部变量
+            fi.freeReg(); 
+            fi.emitMove(r, a);
+        }
+        else if((r = fi.indexOfUpval(var_.name)) >= 0)
+        {
+            //upvalues
+            fi.freeReg();
+            //将值写给upval
+            fi.emitSetUpval(a, r);
+        }
+    }
 }
 
 function cgLocalVarDeclStat(fi, node)
@@ -3878,7 +4046,7 @@ function cgForNumStat(fi, node)
 	let pcForPrep = fi.emitForPrep(a, 0);
 
 	cgBlock(fi, node.block);
-	//fi.closeOpenUpvals();
+	fi.closeOpenUpvals();
 	let pcForLoop = fi.emitForLoop(a, 0);
 
 	fi.fixSbx(pcForPrep, pcForLoop-pcForPrep-1);//从FORPREP指令跳转到FORLOOP指令
@@ -3901,7 +4069,7 @@ function cgWhileStat(fi, node)
 
     fi.enterScope(true);
     cgBlock(fi, node.block);
-    //fi.closeOpenUpvals()
+    fi.closeOpenUpvals();
     fi.emitJmp(0, pcBeforeExp-fi.pc()-1);//跳回到表达式求值语句，再次计算表达式的值
 
     fi.exitScope();
@@ -3928,7 +4096,7 @@ function cgForInStat(fi, node)
 
      cgBlock(fi, node.block);
 
-     //fi.closeOpenUpvals()
+     fi.closeOpenUpvals();
 
      fi.fixSbx(pcJmpToTFC, fi.pc()-pcJmpToTFC);
 

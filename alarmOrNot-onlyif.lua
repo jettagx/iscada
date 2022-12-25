@@ -1,6 +1,9 @@
-t = {[1]="1","one", [4]="four","two","three","four","five", "six",x=100}
-for k,v in pairs(t) 
-do
-    print(k)
-    print(v)
+function F(x)
+    return {get = function() return x end,
+            set = function(y) x = y end}
 end
+
+o1 = F(10)
+print(o1.get())
+o1.set(20)
+print(o1.get())
