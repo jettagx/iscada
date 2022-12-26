@@ -1,9 +1,6 @@
-function F(x)
-    return {get = function() return x end,
-            set = function(y) x = y end}
-end
+a = 10
 
-o1 = F(10)
-print(o1.get())
-o1.set(20)
-print(o1.get())
+repeat
+   print(a)
+   a = a + 1
+until( a > 15 )

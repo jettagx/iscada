@@ -1,17 +1,16 @@
 function F(x)
-local x = 3
+    local x = 3
 
-function f()
-    print(x)
+    if (x < 4)
+    then
+        return {get = function() return z end,
+                set = function(y) z = y end}
+    end
+
+    x = 4
 end
 
-f()
-
-local x = 4
-f()
-
-return f
-end
-
-o1 = F(10)
-o1()
+o1 = F(1)
+print(o1.get())
+o1.set(20)
+print(o1.get())

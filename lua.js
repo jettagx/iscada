@@ -1301,7 +1301,7 @@ function newLuaState()
         let a = ls.stack.get(idx1);
         let b = ls.stack.get(idx2);
 
-        //暂时只支持==和<=和<
+        //暂时只支持==和<=和<,>=,>
         if (op == LUA_OPEQ)
         {
             return (a == b);
@@ -1915,6 +1915,11 @@ const TOKEN_OP_LT = 26;//<
 
 const TOKEN_KW_IN = 27;//in
 
+const TOKEN_KW_REPEAT = 28;//repeat
+const TOKEN_KW_UNTIL = 29;//until
+const TOKEN_OP_GE = 30;//>=
+const TOKEN_OP_GT = 31;//>
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1931,6 +1936,9 @@ keywords.set("do", TOKEN_KW_DO);
 keywords.set("while", TOKEN_KW_WHILE);
 
 keywords.set("in", TOKEN_KW_IN);
+
+keywords.set("repeat", TOKEN_KW_REPEAT);
+keywords.set("until", TOKEN_KW_UNTIL);
 
 function newLexer(chunk, chunkName)
 {
@@ -2191,7 +2199,20 @@ function newLexer(chunk, chunkName)
                     i.next(1);
                     return {line, kind:TOKEN_OP_LT, token:"<"};
                 }
-                
+
+                break;
+
+            case '>':
+                if ((count + 1 != chunk.length) && (chunk[count + 1] == '=')) 
+                {
+                    i.next(2);
+                    return {line, kind:TOKEN_OP_GE, token:">="};
+                } 
+                else 
+                {
+                    i.next(1);
+                    return {line, kind:TOKEN_OP_GT, token:">"};
+                }
                 break;
 
             default:
@@ -2299,6 +2320,7 @@ function isBlockEnd(tokenKind)
         case TOKEN_KW_END:
         case TOKEN_KW_ELSE:
         case TOKEN_KW_RETURN:
+        case TOKEN_KW_UNTIL:
             return true;
             break;
     
@@ -2522,6 +2544,8 @@ function term(lexer)
             case TOKEN_OP_EQ:
             case TOKEN_OP_LE:
             case TOKEN_OP_LT:
+            case TOKEN_OP_GE:
+            case TOKEN_OP_GT:
                 let i = lexer.nextToken();
                 let line = i.line;
                 let op = i.kind;
@@ -3014,6 +3038,27 @@ function parseWhileStat(lexer)
 	return whileStat(exp, block);
 }
 
+function repeatStat(block, exp)
+{
+    let i = {};
+
+    i.type = "RepeatStat";
+
+    i.block = block;
+    i.exp = exp;
+
+    return i;
+}
+
+function parseRepeatStat(lexer)
+{
+    lexer.nextTokenOfKind(TOKEN_KW_REPEAT);//确保是repeat
+    let block = parseBlock(lexer);
+    lexer.nextTokenOfKind(TOKEN_KW_UNTIL);//确保是until
+    let exp = parseExp(lexer);
+    return repeatStat(block, exp);
+}
+
 //解析语句
 function parseStat(lexer)
 {
@@ -3036,7 +3081,11 @@ function parseStat(lexer)
 
         case TOKEN_KW_WHILE:
             return parseWhileStat(lexer);
-            break;   
+            break; 
+            
+        case TOKEN_KW_REPEAT:
+            return parseRepeatStat(lexer);
+            break; 
     
         default:
 		return parseAssignOrFuncCallStat(lexer);
@@ -3290,31 +3339,38 @@ function newFuncInfo(parent, fd)
     }
     
 
-    i.emitBinaryOp = function(op, a, b, c)
+i.emitBinaryOp = function(op, a, b, c)
+{
+    if (op == TOKEN_OP_ADD)
     {
-        //只支持加法和等于判断
-        if (op == TOKEN_OP_ADD)
-        {
-            i.emitABC(OP_ADD, a, b, c);
-            return;
-        }
-        else if (op == TOKEN_OP_EQ)
-        {
-            i.emitABC(OP_EQ, 1, b, c);
-        }
-        else if (op == TOKEN_OP_LE)
-        {
-            i.emitABC(OP_LE, 1, b, c);
-        }
-        else if (op == TOKEN_OP_LT)
-        {
-            i.emitABC(OP_LT, 1, b, c);
-        }
-
-        i.emitJmp(0, 1);
-        i.emitLoadBool(a, 0, 1);
-        i.emitLoadBool(a, 1, 0);
+        i.emitABC(OP_ADD, a, b, c);
+        return;
     }
+    else if (op == TOKEN_OP_EQ)
+    {
+        i.emitABC(OP_EQ, 1, b, c);
+    }
+    else if (op == TOKEN_OP_LE)
+    {
+        i.emitABC(OP_LE, 1, b, c);
+    }
+    else if (op == TOKEN_OP_LT)
+    {
+        i.emitABC(OP_LT, 1, b, c);
+    }
+    else if (op == TOKEN_OP_GE)
+    {
+        i.emitABC(OP_LE, 1, c, b);
+    }
+    else if (op == TOKEN_OP_GT)
+    {
+        i.emitABC(OP_LT, 1, c, b);
+    }
+
+    i.emitJmp(0, 1);
+    i.emitLoadBool(a, 0, 1);
+    i.emitLoadBool(a, 1, 0);
+}
 
     i.emitLoadK = function(a, k)
     {
@@ -4192,6 +4248,24 @@ function cgForInStat(fi, node)
      fi.exitScope();
 }
 
+function cgRepeatStat(fi, node)
+{
+    fi.enterScope(true);
+
+    let pcBeforeBlock = fi.pc();//用来循坏跳回来
+
+    cgBlock(fi, node.block);
+
+    let r = fi.allocReg();
+    cgExp(fi, node.exp, r, 1);
+    fi.freeReg();
+
+    fi.emitTest(r, 0);
+    fi.emitJmp(0, pcBeforeBlock-fi.pc()-1);
+    //fi.closeOpenUpvals();
+    fi.exitScope();
+}
+
 function cgStat(fi, stat)
 {
     switch (stat.type) {
@@ -4221,6 +4295,10 @@ function cgStat(fi, stat)
 
         case "ForInStat":
             cgForInStat(fi, stat);
+            break;
+
+        case "RepeatStat":
+            cgRepeatStat(fi, stat);
             break;
 
         default:
