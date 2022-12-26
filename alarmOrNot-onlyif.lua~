@@ -1,16 +1,6 @@
-function F(x)
-    local x = 3
+a = 10
 
-    if (x < 4)
-    then
-        return {get = function() return z end,
-                set = function(y) z = y end}
-    end
-
-    x = 4
-end
-
-o1 = F(1)
-print(o1.get())
-o1.set(20)
-print(o1.get())
+repeat
+   print(a)
+   a = a + 1
+until( a > 15 )

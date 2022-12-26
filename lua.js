@@ -1920,6 +1920,8 @@ const TOKEN_KW_UNTIL = 29;//until
 const TOKEN_OP_GE = 30;//>=
 const TOKEN_OP_GT = 31;//>
 
+const TOKEN_KW_BREAK = 32;//break
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -1939,6 +1941,8 @@ keywords.set("in", TOKEN_KW_IN);
 
 keywords.set("repeat", TOKEN_KW_REPEAT);
 keywords.set("until", TOKEN_KW_UNTIL);
+
+keywords.set("break", TOKEN_KW_BREAK);
 
 function newLexer(chunk, chunkName)
 {
@@ -3059,6 +3063,23 @@ function parseRepeatStat(lexer)
     return repeatStat(block, exp);
 }
 
+function breakStat(line)
+{
+    let i = {};
+
+    i.type = "BreakStat";
+
+    i.line = line;
+
+    return i;
+}
+
+function parseBreakStat(lexer)
+{
+    lexer.nextTokenOfKind(TOKEN_KW_BREAK);//确保是break
+	return breakStat(lexer.line);
+}
+
 //解析语句
 function parseStat(lexer)
 {
@@ -3085,8 +3106,12 @@ function parseStat(lexer)
             
         case TOKEN_KW_REPEAT:
             return parseRepeatStat(lexer);
-            break; 
-    
+            break;
+
+        case TOKEN_KW_BREAK:
+            return parseBreakStat(lexer); 
+            break;
+
         default:
 		return parseAssignOrFuncCallStat(lexer);
     }
@@ -3175,6 +3200,9 @@ function newFuncInfo(parent, fd)
 
     //支持函数带参数
     i.numParams = fd.parList.length;
+
+    //支持break语句
+    i.breaks = [];
 
     i.addLocVar = function(name)
     {
@@ -3601,10 +3629,53 @@ i.emitBinaryOp = function(op, a, b, c)
     i.enterScope = function(breakable)
     {
         i.scopeLv++;
+
+        if (breakable)
+        {
+            i.breaks.push([]);
+        }
+        else
+        {
+            i.breaks.push(null);
+        }
+    }
+
+    i.addBreakJmp = function(pc)
+    {
+        for (let j = i.scopeLv; j >= 0; j--)
+        {
+            if (i.breaks[j] != null)
+            {
+                i.breaks[j].push(pc);
+                return;
+            }
+        }
     }
 
     i.exitScope = function()
     {
+        let pendingBreakJmps = i.breaks[i.breaks.length-1];
+        //这个数组中如果有值，则是addBreakJmp添加的
+
+        i.breaks.pop();//去掉处理过的元素
+
+        let a = 0;
+        
+        if (pendingBreakJmps != null)
+        {
+            for (let j = 0; j < pendingBreakJmps.length; j++)
+            {
+                let pc = pendingBreakJmps[j];
+    
+                let sbx = i.pc() - pc;//确定跳转到循环结束的长度
+    
+                let inst = ((sbx + MAXARG_sBx) << 14) | a << 6 | OP_JMP;
+                
+                i.insts[pc] = inst;
+            }
+        }
+        
+        //////////////////////////////////////////
         i.scopeLv--;
         for (let item of i.locNames.keys())
         {
@@ -4266,6 +4337,12 @@ function cgRepeatStat(fi, node)
     fi.exitScope();
 }
 
+function cgBreakStat(fi, node)
+{
+    let pc = fi.emitJmp(0, 0);
+	fi.addBreakJmp(pc);
+}
+
 function cgStat(fi, stat)
 {
     switch (stat.type) {
@@ -4299,6 +4376,10 @@ function cgStat(fi, stat)
 
         case "RepeatStat":
             cgRepeatStat(fi, stat);
+            break;
+
+        case "BreakStat":
+            cgBreakStat(fi, stat);
             break;
 
         default:
