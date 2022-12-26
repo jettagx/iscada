@@ -965,6 +965,14 @@ function newLuaStack(size, state)
         }
         //console.log("stack push value:", val);
         t.slots[t.top] = val;
+
+        let obj;
+        if (t.recordSlotsIdx2OpenuvObj && 
+            (obj = t.recordSlotsIdx2OpenuvObj.get(t.top)) != undefined)
+        {
+            obj.val = val;
+        }
+
         t.top++;
     }
 
@@ -979,6 +987,13 @@ function newLuaStack(size, state)
 
         let val = t.slots[t.top];
         t.slots[t.top] = null;
+
+        let obj;
+        if (t.recordSlotsIdx2OpenuvObj && 
+            (obj = t.recordSlotsIdx2OpenuvObj.get(t.top)) != undefined)
+        {
+            obj.val = null;
+        }
 
         //console.log("stack pop value :", val);
 
@@ -1007,7 +1022,14 @@ function newLuaStack(size, state)
                 return null;
             }
 
-            return c.upvals[uvIdx];//注意load（）时候upvals要先赋值！！！
+            if (c.upvals[uvIdx].val != undefined)
+            {
+                return c.upvals[uvIdx].val;//注意load（）时候upvals要先赋值！！！
+            }
+            else
+            {
+                return c.upvals[uvIdx];
+            } 
         }
 
         if (idx == LUA_REGISTRYINDEX)
@@ -1039,7 +1061,8 @@ function newLuaStack(size, state)
 
             if (c != null && uvIdx < c.upvals.length) 
             {
-                c.upvals[uvIdx] = val;
+                //c.upvals[uvIdx] = {val};应该直接修改upvals，而不是指向新对象
+                c.upvals[uvIdx].val = val;
             }
 
             return;
@@ -1056,6 +1079,14 @@ function newLuaStack(size, state)
         if (absIdx > 0 && absIdx <= t.top)
         {
             t.slots[absIdx-1] = val;
+
+            let obj;
+            if (t.recordSlotsIdx2OpenuvObj && 
+                (obj = t.recordSlotsIdx2OpenuvObj.get(absIdx-1)) != undefined)
+            {
+                obj.val = val;
+            }
+
             return;
         }
 
@@ -1235,6 +1266,24 @@ function convertToBoolean(val)
     return Boolean(val);
 }
 
+const LUA_TNIL = 0;
+const LUA_TBOOLEAN = 1;
+const LUA_TNUMBER = 2;
+const LUA_TSTRING = 3;
+const LUA_TTABLE = 4;
+const LUA_TFUNCTION = 5;
+
+
+function luaValue(val, type)
+{
+    let i = {};
+
+    i.val = val;
+    i.type = type;
+    
+    return i;
+}
+
 function newLuaState()
 {
     let ls = {};
@@ -1278,12 +1327,11 @@ function newLuaState()
 
         let closure = newLuaClosure(subProto);
 
-        //let stack = ls.stack;
-        //ls.stack.openuvs = new Map();
-        //ls.stack.closureCopy = closure;
-        //ls.stack.item2i = new Map();
+        if (ls.stack.openuvs == undefined)
+        {
+            ls.stack.openuvs = new Map();
+        }
 
-        //console.log("ls.loadProto",subProto.Upvalues)
         ls.stack.push(closure);
 
         //支持upvalue
@@ -1293,15 +1341,36 @@ function newLuaState()
 
             if (subProto.Upvalues[i].Instack == 1)
             {
-                //closure.upvals[i] = ls.stack.slots[uvIdx];//支持绑定局部变量
-                //ls.stack.openuvs.set(uvIdx, ls.stack.slots[uvIdx]);//用openuvs记录变量
-                closure.upvals[i] = ls.stack.slots[uvIdx];
+                let openuvObj;
 
-                //ls.stack.item2i.set(uvIdx,i);
+                if ((openuvObj = ls.stack.openuvs.get(uvIdx)) != undefined)
+                {
+                    closure.upvals[i] = openuvObj;
+                }
+                else
+                {
+                    let openuvObj = {};
+
+                    openuvObj.val = ls.stack.slots[uvIdx];
+
+                    ls.stack.openuvs.set(uvIdx, openuvObj);
+
+                    //让upvals指向openuv对象,这样修改openuvObj的val，upvals会跟着变
+                    closure.upvals[i] = openuvObj;
+
+                    //为了确保slots内容更新，我们的openuvObj对象也同步更新，需要记录一些数据
+                    if (ls.stack.recordSlotsIdxs == undefined)
+                    {
+                        ls.stack.recordSlotsIdx2OpenuvObj = new Map();
+                    }
+
+                    ls.stack.recordSlotsIdx2OpenuvObj.set(uvIdx, openuvObj);
+                }
+                
             }
             else
             {
-                closure.upvals[i] = ls.stack.closure.upvals[uvIdx];
+                closure.upvals[i] = ls.stack.closure.upvals[uvIdx];//都用val作为前缀
             }
         }
     };
@@ -1326,8 +1395,17 @@ function newLuaState()
     ls.getTable_ = function(t, k, raw)
     {
         //将t的k键压入lua栈
-        let v = t.get(k);
+        let v;
 
+        if (t.val != undefined)
+        {
+            v = t.val.get(k);
+        }
+        else
+        {
+            v = t.get(k);
+        }
+        
         if (v == undefined)
         {
             v = null;
@@ -1405,7 +1483,7 @@ function newLuaState()
         if (proto.Upvalues.length > 0)
         {
             let env = ls.registry.get(LUA_RIDX_GLOBALS);//得到全局表
-            c.upvals[0] = env;
+            c.upvals[0] = {val:env};
         }
 
         return 0;
@@ -1423,7 +1501,15 @@ function newLuaState()
     //设置表格t的键k为值v
     ls.setTable = function(t, k, v, raw)
     {
-        t.put(k, v);
+        if (t.val != undefined)
+        {
+            t.val.put(k, v);
+        }
+        else
+        {
+            t.put(k, v);
+        }
+        
     };
 
     ls.pushJsFunction = function(jsFunction)
@@ -1677,22 +1763,17 @@ function newLuaState()
 
     ls.closeUpvalues = function(a)
     {
-        let closureCopy = ls.stack.closureCopy;
-        let item2i = ls.stack.item2i;//记录item和i的map
-        let openuvs = ls.stack.openuvs;
+        // let openuvs = ls.stack.openuvs;
 
-        // if (closureCopy != undefined)
+        // for (let item of openuvs.keys())
         // {
-        //     for (let item of openuvs.keys())
+        //     if (item >= a-1)
         //     {
-        //         if (item >= a-1)
-        //         {
-        //             let openuv = (openuvs.get(item));//openuv指向lua栈上的局部变量的深拷贝
-                
-        //             closureCopy.upvals[item2i.get(item)] = openuv;//将值重新赋值给upvals
-    
-        //             openuvs.delete(item);
-        //         }
+        //         let openuvObj = openuvs.get(item);//openuv指向lua栈上的局部变量的深拷贝
+
+        //         openuvObj.val = ls.stack.slots[item];//从slots中更新openuvObj的变量值
+
+        //         openuvs.delete(item);
         //     }
         // }
     }
@@ -1784,7 +1865,15 @@ function runLua(showThings)
 
     ls.load(fileData_, "any", "bt");
 
-    ls.call(0, 0);
+    try 
+    {
+        ls.call(0, 0);
+    }
+    catch (e)
+    {
+        console.log(e)
+    }
+    
 }
 
 
@@ -3529,16 +3618,12 @@ function newFuncInfo(parent, fd)
 
     i.closeOpenUpvals = function()
     {
-        //let iParent = i.parent;
-        //if (iParent != undefined || iParent != null)
-        //{
-            let a = i.getJmpArgA();
+        let a = i.getJmpArgA();
 
-            if (a > 0)
-            {
-                i.emitJmp(a, 0);
-            }
-        //}  
+        if (a > 0)
+        {
+            i.emitJmp(a, 0);
+        } 
     }
 
     return i;
