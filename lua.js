@@ -4260,15 +4260,35 @@ function cgFuncCallStat(fi, node)
     fi.freeReg();
 }
 
-function _cgAssignStat(expNum, returnNum, varStartNum, varEndNum, fi, node)
+function _cgAssignStat(expNum, returnNum, varStartNum, varEndNum, giveNull, fi, node)
 {
-    let func = node.expList[expNum];
+    let func;
 
     let n = returnNum;
 
-    let a = fi.allocReg();
-    cgExp(fi, func, a, n);//处理FuncDefExp类型，生成closure语句||
+    let a;
+
+    let oldRegs = fi.usedRegs;
+
+    if (giveNull == false)
+    {
+        func = node.expList[expNum];
+        
+        a = fi.allocReg();
+        cgExp(fi, func, a, n);//处理FuncDefExp类型，生成closure语句||
             //处理数字类型，生成loadk指令
+        //再分配n-1个寄存器占用lua栈的位置，防止TableAccessExp覆盖
+        if (n - 1 > 0)
+        {
+            fi.allocRegs(n - 1);
+        }
+    }
+    else
+    {
+        //表达式不是函数调用，不够填充变量，需要人为创造null
+        a = fi.allocRegs(n);
+        fi.emitLoadNil(a, n);
+    }
 
     a--;
     for (let i = varStartNum; i <= varEndNum; i++)
@@ -4331,7 +4351,7 @@ function _cgAssignStat(expNum, returnNum, varStartNum, varEndNum, fi, node)
         }
     }
 
-    fi.freeReg();
+    fi.usedRegs = oldRegs;
 }
 
 //赋值语句
@@ -4340,7 +4360,7 @@ function cgAssignStat(fi, node)
     if (node.expList.length == 1)
     {
         _cgAssignStat(0, node.varList.length,
-                     0, node.varList.length - 1, fi, node);
+                     0, node.varList.length - 1, false, fi, node);
     }
     else
     {
@@ -4356,12 +4376,31 @@ function cgAssignStat(fi, node)
                 if (i == node.expList.length - 1)
                 {
                     //最后一个表达式
-                    _cgAssignStat(i, node.varList.length - cnt, 
-                        cnt, node.varList.length - 1, fi, node);
+                    //如果是函数表达式
+                    let exp = node.expList[i];
+                    if (exp.type == "FuncCallExp")
+                    {
+                        _cgAssignStat(i, node.varList.length - cnt, 
+                            cnt, node.varList.length - 1, false, fi, node);
+                    }
+                    else
+                    {
+                        _cgAssignStat(i, node.varList.length - cnt, 
+                            cnt, cnt, false, fi, node);//将最后一个表达式写入变量中
+                        
+                        //如果还有多余的变量没有赋值
+                        if (node.varList.length > node.expList.length)
+                        {
+                            //创建null，并写入
+                            _cgAssignStat(i, node.varList.length - cnt, 
+                                cnt + 1, node.varList.length - 1, true, fi, node);
+                        }
+                        
+                    }
                 }
                 else
                 {
-                    _cgAssignStat(i, 1, cnt, cnt, fi, node);
+                    _cgAssignStat(i, 1, cnt, cnt, false, fi, node);
                     cnt++;
                 }
             }
@@ -4377,11 +4416,11 @@ function cgAssignStat(fi, node)
                 {
                     //最后一个表达式
                     _cgAssignStat(i, node.varList.length - cnt, 
-                        cnt, node.varList.length - 1, fi, node);
+                        cnt, node.varList.length - 1, false, fi, node);
                 }
                 else
                 {
-                    _cgAssignStat(i, 1, cnt, cnt, fi, node);
+                    _cgAssignStat(i, 1, cnt, cnt, false, fi, node);
                     cnt++;
                 }
 

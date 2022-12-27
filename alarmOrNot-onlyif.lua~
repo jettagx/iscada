@@ -1,18 +1,8 @@
 function f()
-    return 
+    return 10,15
 end
-
-function g()
-    return 1,2 
-end
-
-function k()
-    return 1,2 
-end
-
-
-a, b, c, d = f(),g(),k()
-print(a)
-print(b)
+a = {b=20,c=30}
+a.b,a.c, c = f(),2
+print(a.b)
+print(a.c)
 print(c)
-print(d)
