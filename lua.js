@@ -3260,13 +3260,21 @@ function parseRetExps(lexer)
 
     lexer.nextToken();//跳过return关键字
 
-    //直接解析表达式，暂时只支持一个返回值
-    let exps = parseExpList(lexer);
-    // if (lexer.lookAhead() == TOKEN_SEP_SEMI)
-    // {
-    //     lexer.NextToken();//如果有分号，跳过
-    // }
-    return exps;
+
+    switch (lexer.lookAhead()) {
+        case TOKEN_EOF:
+        case TOKEN_KW_ELSE:
+        //case TOKEN_KW_ELSEIF:
+        case TOKEN_KW_UNTIL:
+        case TOKEN_KW_END:
+            return [];
+            break;
+
+        default:
+            let exps = parseExpList(lexer);
+            return exps;
+            break;
+    } 
 }
 
 
@@ -3896,10 +3904,22 @@ function cgRetStat(fi, retExps)
         fi.closeOpenUpvals();
         fi.emitReturn(r, len);//生成返回指令
     }
-    else
+
+    //对于多个返回值
+    for (let i = 0; i < len; i++)
     {
-        throw "cgRetStat error";
+        let retExp = retExps[i];
+
+        let r = fi.allocReg();
+
+        cgExp(fi, retExp, r, 1);
     }
+
+    fi.freeRegs(len);
+
+    let a = fi.usedRegs;
+
+    fi.emitReturn(a, len);//将多个参数都按个数全部压栈
 }
 
 function cgBinopExp(fi, node, a)
