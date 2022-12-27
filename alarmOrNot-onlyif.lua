@@ -1,13 +1,14 @@
-a = 10
+function add0(a, b)
+    if b >= 10 then
+        error("number is too large!")
+    else
+        return a + b
+    end
+end
 
-repeat
-   print(a)
+function add1(a, b) return add0(a, b) end
+function add2(a, b) return add1(a, b) end
 
-   a = a + 1
-
-   if (a == 13)
-   then
-       break
-   end
-
-until( a > 15 )
+ok, result = pcall(add2, 4, 10)
+print(ok)
+print(result)

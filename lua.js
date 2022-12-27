@@ -1127,6 +1127,23 @@ function newLuaStack(size, state)
         }
     };
 
+    t.reverse = function(from, to)
+    {
+        let slots = t.slots;
+
+        while(from < to)
+        {
+            let tmp;
+
+            tmp = slots[from];
+            slots[from] = slots[to];
+            slots[to] = tmp;
+
+            from++;
+            to--;
+        }
+    }
+
     return t;
 }
 
@@ -1778,6 +1795,70 @@ function newLuaState()
         // }
     }
 
+    ls.error = function()
+    {
+        let error = ls.stack.pop();
+        throw error;
+    }
+
+    ls.getTop = function()
+    {
+        return ls.stack.top;
+    }
+
+    ls.rotate = function(idx, n)
+    {
+        let t = ls.stack.top - 1;
+        let p = ls.stack.absIndex(idx) - 1;
+
+        let m;
+
+        if (n >= 0)
+        {
+            m = t - n;
+        }
+        else
+        {
+            m = p - n - 1;
+        }
+
+        ls.stack.reverse(p, m);
+        ls.stack.reverse(m+1, t);
+        ls.stack.reverse(p, t);
+    }
+
+    ls.insert = function(idx)
+    {
+        ls.rotate(idx, 1);
+    }
+
+    ls.pcall = function(nArgs, nResults, msgh)//2,-1,0
+    {
+        let caller = ls.stack;
+
+        let status = LUA_ERRRUN;
+
+        try 
+        {
+            ls.call(nArgs, nResults);//这个函数会将传给pcall的参数都出栈
+        }
+        catch(err)
+        {
+            //从发生错误，调用error的函数，退回到当前函数
+            while(ls.stack != caller)
+            {
+                ls.popLuaStack();
+            }
+
+            ls.stack.push(err);//压入error函数的参数，当前栈中只有这个错误信息
+
+            return status;
+        }
+        status = LUA_OK;
+
+        return status;
+    }
+
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
 
     return ls;
@@ -1785,6 +1866,15 @@ function newLuaState()
 
 
 //////////////////////////////////////////////////
+const LUA_OK = 0;
+const LUA_YIELD = 1;
+const LUA_ERRRUN = 2;
+const LUA_ERRSYNTAX = 3;
+const LUA_ERRMEM = 4;
+const LUA_ERRGCMM = 5;
+const LUA_ERRERR = 6;
+const LUA_ERRFILE = 7;
+
 
 function print(ls)
 {
@@ -1800,6 +1890,22 @@ function pairs(ls)
     ls.pushValue(1);//表t
     ls.pushNil();//初始key
     return 3;
+}
+
+function error(ls)
+{
+    return ls.error();
+}
+
+function pcall(ls)
+{
+    let nArgs = ls.getTop() - 1;//获得函数参数个数
+    let status = ls.pcall(nArgs, -1, 0);
+
+    //在栈顶压入函数执行结果，true或者false
+    ls.pushBoolean(status == LUA_OK);
+    ls.insert(1);//将上面的true或者false设置为第一个返回值
+    return ls.getTop();//返回参数个数由getTop函数结果决定
 }
 
 function next(ls)
@@ -2743,12 +2849,27 @@ function parsePrefixExp(lexer)
     return _finishPrefixExp(lexer, exp);
 }
 
-function parseAssignStat(lexer, prefixExp)
+function _finishVarList(lexer, var0)
+{
+    let vars = [];
+    vars.push(var0);
+
+    while(lexer.lookAhead() == TOKEN_SEP_COMMA)
+    {
+        lexer.nextToken();//跳过逗号
+        let exp = parsePrefixExp(lexer);
+        vars.push(exp); 
+    }
+
+    return vars;
+}
+
+function parseAssignStat(lexer, var0)
 {
     let varList = [];
     let expList = [];
 
-    varList.push(prefixExp);//暂时只支持一个变量的情况
+    varList = _finishVarList(lexer, var0);
     lexer.nextTokenOfKind(TOKEN_OP_ASSIGN);//确保为=号
     expList = parseExpList(lexer);//解析表达式
 
@@ -2799,7 +2920,7 @@ function _parseParList(lexer)
         while(lexer.lookAhead() == TOKEN_SEP_COMMA)
         {
             lexer.nextToken()//跳过逗号
-            if (lexer.LookAhead() == TOKEN_IDENTIFIER)
+            if (lexer.lookAhead() == TOKEN_IDENTIFIER)
             {   
                 //如果是标识符
                 let ident = lexer.nextIdentifier();
@@ -3650,6 +3771,7 @@ i.emitBinaryOp = function(op, a, b, c)
                 return;
             }
         }
+        throw "break error";
     }
 
     i.exitScope = function()
@@ -3666,9 +3788,9 @@ i.emitBinaryOp = function(op, a, b, c)
             for (let j = 0; j < pendingBreakJmps.length; j++)
             {
                 let pc = pendingBreakJmps[j];
-    
+
                 let sbx = i.pc() - pc;//确定跳转到循环结束的长度
-    
+
                 let inst = ((sbx + MAXARG_sBx) << 14) | a << 6 | OP_JMP;
                 
                 i.insts[pc] = inst;
@@ -4120,69 +4242,78 @@ function cgFuncCallStat(fi, node)
 
 //赋值语句
 function cgAssignStat(fi, node)
-{
-    //只支持单个函数表达式和单个变量
-    let var_ =  node.varList[0];
+{   
     let func = node.expList[0];
 
+    let n = node.varList.length - node.expList.length + 1;
+
     let a = fi.allocReg();
-    cgExp(fi, func, a, 1);//处理FuncDefExp类型，生成closure语句||
+    cgExp(fi, func, a, n);//处理FuncDefExp类型，生成closure语句||
     //fi.freeReg();         //处理数字类型，生成loadk指令
 
-
-    if (var_.type == "TableAccessExp")
+    
+    a--;
+    for (let i = 0; i < node.varList.length; i++)
     {
-        //如果是表访问表达式
-        let t = fi.allocReg();
-        cgExp(fi, var_.prefixExp, t, 1);//得到表变量
+        let var_ =  node.varList[i];
 
-        let k = fi.allocReg();
-        cgExp(fi, var_.keyExp, k, 1);//得到键
-
-        //设置表t的k键值为func的值
-        fi.emitSetTable(t, k, a);
-
-        fi.freeReg();
-        fi.freeReg();
-        fi.freeReg();
-        return;
-    }
-
-    let r;
-
-    if (var_.type == "NameExp")
-    {
-        //如果是全局变量
-        if (fi.slotOfLocVar(var_.name) < 0 && fi.indexOfUpval(var_.name) < 0)
+        a++;
+        
+        if (var_.type == "TableAccessExp")
         {
-            ///////////////////////////////////////////////////////
-            //常规全局变量
-            // //手动调用，否则无法绑定全局表
-            fi.freeReg(); 
-            let upvalueIdx = fi.indexOfUpval("_ENV");
-
-            //生成settapup语句
-            //查找var_在常量表的索引
-            let index = fi.indexOfConstant(var_.name);
-            index |= 0x100;//转换为常量表索引
-
-            fi.emitSetTabUp(upvalueIdx, index, a);
-            ///////////////////////////////////////////////////////
-        }
-        else if ((r = fi.slotOfLocVar(var_.name)) >= 0)
-        {
-            //局部变量
-            fi.freeReg(); 
-            fi.emitMove(r, a);
-        }
-        else if((r = fi.indexOfUpval(var_.name)) >= 0)
-        {
-            //upvalues
+            //如果是表访问表达式
+            let t = fi.allocReg();
+            cgExp(fi, var_.prefixExp, t, 1);//得到表变量
+    
+            let k = fi.allocReg();
+            cgExp(fi, var_.keyExp, k, 1);//得到键
+    
+            //设置表t的k键值为func的值
+            fi.emitSetTable(t, k, a);
             fi.freeReg();
-            //将值写给upval
-            fi.emitSetUpval(a, r);
+            fi.freeReg();
+            
+            continue;
+        }
+    
+        let r;
+    
+        if (var_.type == "NameExp")
+        {
+            //如果是全局变量
+            if (fi.slotOfLocVar(var_.name) < 0 && fi.indexOfUpval(var_.name) < 0)
+            {
+                ///////////////////////////////////////////////////////
+                //常规全局变量
+                // //手动调用，否则无法绑定全局表
+                //fi.freeReg(); 
+                let upvalueIdx = fi.indexOfUpval("_ENV");
+    
+                //生成settapup语句
+                //查找var_在常量表的索引
+                let index = fi.indexOfConstant(var_.name);
+                index |= 0x100;//转换为常量表索引
+    
+                fi.emitSetTabUp(upvalueIdx, index, a);
+                ///////////////////////////////////////////////////////
+            }
+            else if ((r = fi.slotOfLocVar(var_.name)) >= 0)
+            {
+                //局部变量
+                //fi.freeReg(); 
+                fi.emitMove(r, a);
+            }
+            else if((r = fi.indexOfUpval(var_.name)) >= 0)
+            {
+                //upvalues
+                //fi.freeReg();
+                //将值写给upval
+                fi.emitSetUpval(a, r);
+            }
         }
     }
+
+    fi.freeReg();
 }
 
 function cgLocalVarDeclStat(fi, node)
@@ -4494,6 +4625,9 @@ function lexerTokens()
 
         ls.register("next", next);//注册next函数
         ls.register("pairs", pairs);//注册pairs函数
+
+        ls.register("error", error);//注册error函数
+        ls.register("pcall", pcall);//注册pcall函数
 
         let button = '{"type":"button","name":"buttonAlarm","device_id":[1],"variable":[4],"value":[0],"x":120,"y":0}';
 
