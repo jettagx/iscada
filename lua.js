@@ -4260,20 +4260,18 @@ function cgFuncCallStat(fi, node)
     fi.freeReg();
 }
 
-//赋值语句
-function cgAssignStat(fi, node)
-{   
-    let func = node.expList[0];
+function _cgAssignStat(expNum, returnNum, varStartNum, varEndNum, fi, node)
+{
+    let func = node.expList[expNum];
 
-    let n = node.varList.length - node.expList.length + 1;
+    let n = returnNum;
 
     let a = fi.allocReg();
     cgExp(fi, func, a, n);//处理FuncDefExp类型，生成closure语句||
-    //fi.freeReg();         //处理数字类型，生成loadk指令
+            //处理数字类型，生成loadk指令
 
-    
     a--;
-    for (let i = 0; i < node.varList.length; i++)
+    for (let i = varStartNum; i <= varEndNum; i++)
     {
         let var_ =  node.varList[i];
 
@@ -4284,10 +4282,10 @@ function cgAssignStat(fi, node)
             //如果是表访问表达式
             let t = fi.allocReg();
             cgExp(fi, var_.prefixExp, t, 1);//得到表变量
-    
+
             let k = fi.allocReg();
             cgExp(fi, var_.keyExp, k, 1);//得到键
-    
+
             //设置表t的k键值为func的值
             fi.emitSetTable(t, k, a);
             fi.freeReg();
@@ -4295,9 +4293,9 @@ function cgAssignStat(fi, node)
             
             continue;
         }
-    
+
         let r;
-    
+
         if (var_.type == "NameExp")
         {
             //如果是全局变量
@@ -4308,12 +4306,12 @@ function cgAssignStat(fi, node)
                 // //手动调用，否则无法绑定全局表
                 //fi.freeReg(); 
                 let upvalueIdx = fi.indexOfUpval("_ENV");
-    
+
                 //生成settapup语句
                 //查找var_在常量表的索引
                 let index = fi.indexOfConstant(var_.name);
                 index |= 0x100;//转换为常量表索引
-    
+
                 fi.emitSetTabUp(upvalueIdx, index, a);
                 ///////////////////////////////////////////////////////
             }
@@ -4334,6 +4332,67 @@ function cgAssignStat(fi, node)
     }
 
     fi.freeReg();
+}
+
+//赋值语句
+function cgAssignStat(fi, node)
+{   
+    if (node.expList.length == 1)
+    {
+        _cgAssignStat(0, node.varList.length,
+                     0, node.varList.length - 1, fi, node);
+    }
+    else
+    {
+        //多个表达式的情况，一个表达式一个表达式的处理
+        //对于不是最后一个表达式，要求函数只返回一个变量
+        //对于最后一个表达式，匹配剩下的所有变量
+        if (node.varList.length >= node.expList.length)
+        {
+            //变量值大于等于表达式
+            let cnt = 0;
+            for(let i = 0; i < node.expList.length; i++)
+            {
+                if (i == node.expList.length - 1)
+                {
+                    //最后一个表达式
+                    _cgAssignStat(i, node.varList.length - cnt, 
+                        cnt, node.varList.length - 1, fi, node);
+                }
+                else
+                {
+                    _cgAssignStat(i, 1, cnt, cnt, fi, node);
+                    cnt++;
+                }
+            }
+        }
+        else
+        {
+            //变量值小于表达式的值
+            //不去执行多余的表达式
+            let cnt = 0;
+            for(let i = 0; i < node.expList.length; i++)
+            {
+                if (i == node.expList.length - 1)
+                {
+                    //最后一个表达式
+                    _cgAssignStat(i, node.varList.length - cnt, 
+                        cnt, node.varList.length - 1, fi, node);
+                }
+                else
+                {
+                    _cgAssignStat(i, 1, cnt, cnt, fi, node);
+                    cnt++;
+                }
+
+                if (cnt == node.varList.length)
+                {
+                    break;
+                }
+            }
+        }
+        
+    }
 }
 
 function cgLocalVarDeclStat(fi, node)
