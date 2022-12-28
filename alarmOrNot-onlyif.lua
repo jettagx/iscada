@@ -1,15 +1,16 @@
-function f()
-    print("haha")
-    return 1,2
+mt = {}
+mt.__add = function(v1, v2)
+    return vector(v1.x + v2.x, v1.y + v2.y)
 end
 
-function g()
-    print("hehe")
-    return 
+function vector(x, y)
+    local v = {x = x, y = y}
+    setmetatable(v, mt)
+    return v
 end
 
-
-a, b, c = g(),10
-print(a)
-print(b)
-print(c)
+v1 = vector(1, 2)
+v2 = vector(3, 5)
+v3 = v1 + v2
+print(v3.x)
+print(v3.y)

@@ -1160,6 +1160,9 @@ function newLuaTable(nArr, nRec)
 
     i.keys = new Map();//支持for迭代器
 
+    i.type = "LuaTable";
+    i.metaTable = null;
+
     i.nextKey = function(key)
     {
         if (key == null || i.keys.size == 0)
@@ -1667,6 +1670,85 @@ function newLuaState()
         ls.stack.push(b);
     };
 
+    let operators = [];
+    operators.push({metamethod:"__add",integerFunc:null,floatFunc:null});
+    operators.push({metamethod:"__sub",integerFunc:null,floatFunc:null});
+
+    function _arith(a, b, operator)
+    {
+        //如果是数字，直接计算
+        if ((typeof(a) === 'number') && (typeof(b) === 'number'))
+        {
+            if (operator.metamethod == "__add")
+            {
+                return a + b;
+            }
+            else if (operator.metamethod == "__sub")
+            {
+                return a - b;
+            }
+        }
+
+        //如果不是数字，返回null
+        return null;
+    }
+
+    function getMetatable(val, ls)
+    {
+        if (val.type == "LuaTable")
+        {
+            return val.metaTable;
+        }
+
+        throw "getMetatable error";
+    }
+
+    function getMetaField(b, mmName, ls)
+    {
+        //只支持取表的元表
+        if (b.type == "LuaTable")
+        {
+            let mt;
+            if (mt = getMetatable(b, ls))
+            {
+                let mmFunc;
+                if (mmFunc = mt.get(mmName))//调用表的get函数
+                {
+                    return mmFunc;
+                } 
+
+                return null;
+            }
+        }
+        else
+        {
+            throw "getMetaField error";
+        }
+
+        return null;
+    }
+
+    function callMetaMethod(a, b, mmName, ls)
+    {
+        let mm;
+        
+        if ((mm = getMetaField(a, mmName, ls)) == null)
+        {
+            if ((mm = getMetaField(b, mmName, ls)) == null)
+            {
+                //如果在元表中找不到函数__add,或者__sub，则返回
+                return {result:null, ok:false};
+            }
+        }
+
+        //ls.stack.check(4);
+        ls.stack.push(mm);//压入元方法
+        ls.stack.push(a);
+        ls.stack.push(b);
+        ls.call(2, 1);//两个函数参数，一个返回值
+        return {result: ls.stack.pop(), ok: true};//栈顶为计算结果
+    }
+
     ls.arith = function(op)
     {
         //只处理加法和减法指令
@@ -1674,14 +1756,24 @@ function newLuaState()
         b = ls.stack.pop();
         a = ls.stack.pop();
 
-        if (op == LUA_OPADD)
+        let result;
+
+        //如果是数字，直接计算返回
+        let operator = operators[op];
+        if (result = _arith(a, b, operator))
         {
-            ls.stack.push(a+b);
+            ls.stack.push(result);
             return;
         }
-        else if (op == LUA_OPSUB)
+
+        //如果不是数，则调用元表的元方法计算
+        let mm = operator.metamethod;
+
+        let callResult = callMetaMethod(a, b, mm, ls);
+
+        if (callResult.ok)
         {
-            ls.stack.push(a-b);
+            ls.stack.push(callResult.result);
             return;
         }
 
@@ -1859,6 +1951,39 @@ function newLuaState()
         return status;
     }
 
+    function setMetaTable(val, mt, ls)
+    {
+        if (val.type == "LuaTable")
+        {
+            //如果是表，则设置专属元表
+            val.metaTable = mt;
+        }
+        else
+        {
+            throw "setMetaTable unsupport";
+        }
+    }
+
+    ls.setMetaTable = function(idx)
+    {
+        let val = ls.stack.get(idx);
+
+        let mtVal = ls.stack.pop();
+
+        if (mtVal == null)
+        {
+            setMetaTable(val, null, ls);
+        }
+        else if(mtVal.type == "LuaTable")
+        {
+            setMetaTable(val, mtVal, ls);
+        }
+        else
+        {
+            throw "table expected !";
+        }
+    }
+
     ls.pushLuaStack(newLuaStack(LUA_MINSTACK, ls));
 
     return ls;
@@ -1921,6 +2046,12 @@ function next(ls)
         ls.pushNil();//栈顶是null
         return 1;
     }
+}
+
+function setMetaTable(ls)
+{
+    ls.setMetaTable(1);
+    return 1;
 }
 
 function setValue(ls)
@@ -4742,6 +4873,8 @@ function lexerTokens()
 
         ls.register("error", error);//注册error函数
         ls.register("pcall", pcall);//注册pcall函数
+
+        ls.register("setmetatable", setMetaTable);//注册setMetaTable函数
 
         let button = '{"type":"button","name":"buttonAlarm","device_id":[1],"variable":[4],"value":[0],"x":120,"y":0}';
 
