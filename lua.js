@@ -4407,27 +4407,23 @@ function cgAssignStat(fi, node)
         }
         else
         {
-            //变量值小于表达式的值
+            //变量个数小于表达式个数
             //不去执行多余的表达式
             let cnt = 0;
             for(let i = 0; i < node.expList.length; i++)
             {
-                if (i == node.expList.length - 1)
+                if (cnt >= node.varList.length)
                 {
-                    //最后一个表达式
-                    _cgAssignStat(i, node.varList.length - cnt, 
-                        cnt, node.varList.length - 1, false, fi, node);
+                    let a = fi.allocReg();
+                    cgExp(fi, node.expList[i], a, 1);
+                    fi.freeReg();
                 }
                 else
                 {
                     _cgAssignStat(i, 1, cnt, cnt, false, fi, node);
-                    cnt++;
                 }
 
-                if (cnt == node.varList.length)
-                {
-                    break;
-                }
+                cnt++;
             }
         }
         

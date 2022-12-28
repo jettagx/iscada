@@ -1,8 +1,15 @@
 function f()
-    return 10,15
+    print("haha")
+    return 1,2
 end
-a = {b=20,c=30}
-a.b,a.c, c = f(),2
-print(a.b)
-print(a.c)
+
+function g()
+    print("hehe")
+    return 
+end
+
+
+a, b, c = g(),10,15,f()
+print(a)
+print(b)
 print(c)
