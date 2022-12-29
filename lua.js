@@ -337,6 +337,8 @@ const OP_TFORLOOP = 0x2a;
 
 const OP_SETUPVAL = 0x09;
 
+const OP_SELF = 0x0c;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -376,6 +378,8 @@ opCodes[OP_TFORCALL] = getOpInfo(0, 0, OpArgN, OpArgU, IABC, "TFORCALL", _tForCa
 opCodes[OP_TFORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "TFORLOOP", _tForLoop);
 
 opCodes[OP_SETUPVAL] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "SETUPVAL", _setUpVal);
+
+opCodes[OP_SELF] = getOpInfo(0, 1, OpArgR, OpArgK, IABC, "SELF", _self);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -759,6 +763,19 @@ function _setUpVal(inst, ls)
     let b = i.b + 1;
 
     ls.copy(a, luaUpvalueIndex(b));
+}
+
+function _self(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b + 1;
+    let c = i.c;
+
+    ls.copy(b, a+1);
+    ls.getRK(c);
+    ls.getTable(b);
+    ls.replace(a);
 }
 
 function _compare(inst, ls, op)
@@ -2159,6 +2176,8 @@ const TOKEN_OP_GT = 31;//>
 
 const TOKEN_KW_BREAK = 32;//break
 
+const TOKEN_SEP_COLON = 33;//:
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -2454,6 +2473,11 @@ function newLexer(chunk, chunkName)
                     i.next(1);
                     return {line, kind:TOKEN_OP_GT, token:">"};
                 }
+                break;
+
+            case ':':
+                i.next(1);
+                return {line, kind:TOKEN_SEP_COLON, token:":"};
                 break;
 
             default:
@@ -2854,13 +2878,14 @@ function nameExp(line, name)
     return i;
 }
 
-function funcCallExp(line, lastLine, prefixExp, args)
+function funcCallExp(line, lastLine, prefixExp, nameExp, args)
 {
     let i = {};
 
     i.line = line;
     i.lastLine = lastLine;
     i.prefixExp = prefixExp;
+    i.nameExp = nameExp;
     i.args = args;
 
     i.type = "FuncCallExp";
@@ -2908,15 +2933,31 @@ function _parseArgs(lexer)
     return args;
 }
 
+function _parseNameExp(lexer)
+{
+    if (lexer.lookAhead() == TOKEN_SEP_COLON)
+    {
+        lexer.nextToken();//跳过冒号
+
+        let ident = lexer.nextIdentifier();
+
+        return stringExp(ident.line, ident.token);
+    }
+
+    return null;
+}
+
 function _finishFuncCallExp(lexer, prefixExp)
 {
+    let nameExp = _parseNameExp(lexer);
+
     let line = lexer.line;
 
     let args = _parseArgs(lexer);
 
     let lastLine = lexer.line;
 
-    return funcCallExp(line, lastLine, prefixExp, args);
+    return funcCallExp(line, lastLine, prefixExp, nameExp, args);
 }
 
 function _finishPrefixExp(lexer, exp)
@@ -2925,6 +2966,7 @@ function _finishPrefixExp(lexer, exp)
     {
         switch (lexer.lookAhead()) {
             case TOKEN_SEP_LPAREN:
+            case TOKEN_SEP_COLON://冒号，则为函数调用语句
                 exp = _finishFuncCallExp(lexer, exp);
                 break;
     
@@ -3031,7 +3073,31 @@ function _parseFuncName(lexer)
     let identifier = lexer.nextIdentifier();
     let exp = nameExp(identifier.line, identifier.token);//函数名表达式
 
-    return exp;
+    let hasColon = false;
+
+    while(lexer.lookAhead() == TOKEN_SEP_DOT)//当时点号时
+    {
+        lexer.nextToken();//跳过点号
+        let ident = lexer.nextIdentifier();
+
+        let idx = stringExp(ident.line, ident.token);//key是string类型
+
+        exp = tableAccessExp(ident.line, exp, idx);
+    }
+
+    if (lexer.lookAhead() == TOKEN_SEP_COLON)//如果有冒号
+    {
+        lexer.nextToken();//跳过冒号
+        let ident = lexer.nextIdentifier();
+
+        let idx = stringExp(ident.line, ident.token);//key是string类型
+
+        exp = tableAccessExp(ident.line, exp, idx);
+
+        hasColon = true;
+    }
+
+    return {fnExp: exp, hasColon: hasColon};
 }
 
 function _parseParList(lexer)
@@ -3115,11 +3181,17 @@ function parseFuncDefStat(lexer)
 {
     lexer.nextTokenOfKind(TOKEN_KW_FUNCTION);
 
-    let fnExp = _parseFuncName(lexer);//解析函数名
+    let fnName = _parseFuncName(lexer);//解析函数名
     let fdExp = parseFuncDefExp(lexer);//解析函数体
 
+    if (fnName.hasColon)
+    {
+        //v:name(args)=>v.name(self, args)
+        fdExp.parList.unshift("self");//给参数列表添加self关键字
+    }
+
     let varList = [];
-    varList.push(fnExp);
+    varList.push(fnName.fnExp);
 
     let expList = [];
     expList.push(fdExp);
@@ -3756,6 +3828,11 @@ i.emitBinaryOp = function(op, a, b, c)
         i.emitABC(OP_SETUPVAL, a, b, 0);
     }
 
+    i.emitSelf = function(a, b, c)
+    {
+        i.emitABC(OP_SELF, a, b, c);
+    }
+
     ////////////////////////////////
     //创建Upvalues
     i.getUpvalues = function()
@@ -4129,6 +4206,14 @@ function prepFuncCall(fi, node, a)
 
     cgExp(fi, node.prefixExp, a, 1);//加载函数
 
+    if (node.nameExp != null)
+    {
+        let c = 0x100 + fi.indexOfConstant(node.nameExp.str);
+        fi.emitSelf(a, a, c);
+
+        fi.allocReg();//留给表格
+    }
+
     for (let i = 0; i < nArgs; i++)
     {
         let arg = node.args[i];
@@ -4139,6 +4224,11 @@ function prepFuncCall(fi, node, a)
     }
 
     fi.freeRegs(nArgs);
+
+    if (node.nameExp != null)
+    {
+        nArgs++;
+    }
 
     return nArgs;
 }

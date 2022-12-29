@@ -1,16 +1,15 @@
-mt = {}
-mt.__add = function(v1, v2)
-    return vector(v1.x + v2.x, v1.y + v2.y)
+t = {time = 10}
+
+function t.addTime(self, time)
+    self.time = self.time + time
 end
 
-function vector(x, y)
-    local v = {x = x, y = y}
-    setmetatable(v, mt)
-    return v
+function t:setTime(time)
+    self.time = time
 end
 
-v1 = vector(1, 2)
-v2 = vector(3, 5)
-v3 = v1 + v2
-print(v3.x)
-print(v3.y)
+t:addTime(20)
+print(t.time)
+
+t.setTime(t, 15)
+print(t.time)

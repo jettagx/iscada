@@ -1,15 +1,15 @@
-function f()
-    print("haha")
-    return 1,2
+t = {time = 10}
+
+function t.addTime(self, time)
+    self.time = self.time + time
 end
 
-function g()
-    print("hehe")
-    return 
+function t:setTime(time)
+    self.time = time
 end
 
+t.addTime(t,20)
+print(t.time)
 
-a, b, c = g(),10
-print(a)
-print(b)
-print(c)
+t.setTime(t, 15)
+print(t.time)
