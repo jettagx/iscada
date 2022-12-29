@@ -1265,6 +1265,13 @@ function newLuaTable(nArr, nRec)
         return i._map.get(key);
     };
 
+
+    i.hasMetafield = function(fieldName)
+    {
+        return (i.metaTable != null) && (i.metaTable.get(fieldName) != null || 
+                                        i.metaTable.get(fieldName) != undefined); 
+    }
+
     return i;
 }
 
@@ -1448,7 +1455,39 @@ function newLuaState()
             v = null;
         }
 
-        ls.stack.push(v);
+        if (raw || v != null || !t.hasMetafield("__index"))
+        {
+            ls.stack.push(v);
+            return;
+        }
+
+        if (!raw)
+        {
+            let mf;
+            if ((mf = getMetaField(t, "__index", ls)) != null)
+            {
+                //继续访问元表
+                if (mf.type == "LuaTable")
+                {
+                    return ls.getTable_(mf, k, false);//递归调用获得函数
+                }
+                else
+                {
+                    //如果是函数类型，直接调用这个函数
+                    ls.stack.push(mf);
+                    ls.stack.push(t);
+                    ls.stack.push(k);
+
+                    ls.call(2, 1);
+
+                    let v = ls.stack.get(-1);
+
+                    return v;
+                }
+            }
+            
+        }
+        
     };
 
     ls.getTable = function(idx)

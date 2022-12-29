@@ -1,15 +1,14 @@
-t = {time = 10}
+Account = {price = 0,
+           showPrice = function (self) print(self.price) end}
 
-function t.addTime(self, time)
-    self.time = self.time + time
+Account:showPrice()
+
+function Account:new(o)
+    self.__index = self
+    setmetatable(o, self)
+    return o
 end
 
-function t:setTime(time)
-    self.time = time
-end
-
-t:addTime(20)
-print(t.time)
-
-t.setTime(t, 15)
-print(t.time)
+b = Account:new({price = 10})
+b.showPrice(b)
+b:showPrice()
