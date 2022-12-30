@@ -1,13 +1,5 @@
-Account = {price = 0,
-           showPrice = function (self) print(self.price) end}
-
-Account:showPrice()
-
-function Account:new(o)
-    self.__index = self
-    setmetatable(o, self)
-    return o
+function f(a)
+print(a or 2)
 end
 
-b = Account:new({price = 10})
-b.showPrice(b)
+f(false)

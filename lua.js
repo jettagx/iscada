@@ -339,6 +339,8 @@ const OP_SETUPVAL = 0x09;
 
 const OP_SELF = 0x0c;
 
+const OP_TESTSET = 0x23;
+
 
 opCodes[OP_GETTABUP] = getOpInfo(0, 1, OpArgU, OpArgK, IABC, "GETTABUP", _getTabUp);
 opCodes[OP_LOADK] = getOpInfo(0, 1, OpArgK, OpArgN, IABx, "LOADK", _loadK);
@@ -380,6 +382,8 @@ opCodes[OP_TFORLOOP] = getOpInfo(0, 1, OpArgR, OpArgN, IAsBx, "TFORLOOP", _tForL
 opCodes[OP_SETUPVAL] = getOpInfo(0, 0, OpArgU, OpArgN, IABC, "SETUPVAL", _setUpVal);
 
 opCodes[OP_SELF] = getOpInfo(0, 1, OpArgR, OpArgK, IABC, "SELF", _self);
+
+opCodes[OP_TESTSET] = getOpInfo(1, 1, OpArgR, OpArgU, IABC, "TESTSET", _testSet);
 
 
 const LUAI_MAXSTACK = 1000000;
@@ -776,6 +780,23 @@ function _self(inst, ls)
     ls.getRK(c);
     ls.getTable(b);
     ls.replace(a);
+}
+
+function _testSet(inst, ls)
+{
+    let i = inst.abc();
+    let a = i.a + 1;
+    let b = i.b + 1;
+    let c = i.c;
+
+    if (ls.toBoolean(b) == (c != 0))
+    {
+        ls.copy(b, a);
+    }
+    else
+    {
+        ls.addPC(1);
+    }
 }
 
 function _compare(inst, ls, op)
@@ -1307,7 +1328,12 @@ function newJsClosure(jsFunction, nUpvals)
 
 function convertToBoolean(val)
 {
-    return Boolean(val);
+    if (val == null || val === false)
+    {
+        return false;
+    }
+
+    return true;
 }
 
 const LUA_TNIL = 0;
@@ -1427,6 +1453,12 @@ function newLuaState()
     ls.toBoolean = function (idx)
     {
         let val = ls.stack.get(idx);
+
+        if (val == undefined)
+        {
+            val = null;
+        }
+        
         return convertToBoolean(val);
     };
 
@@ -2217,6 +2249,14 @@ const TOKEN_KW_BREAK = 32;//break
 
 const TOKEN_SEP_COLON = 33;//:
 
+const TOKEN_OP_OR = 34;//or
+
+const TOKEN_KW_FALSE = 35;//false
+const TOKEN_KW_NIL = 36;//nil
+const TOKEN_KW_TRUE = 37;//true
+
+
+
 let keywords = new Map();
 keywords.set("function", TOKEN_KW_FUNCTION);
 keywords.set("if", TOKEN_KW_IF);
@@ -2238,6 +2278,11 @@ keywords.set("repeat", TOKEN_KW_REPEAT);
 keywords.set("until", TOKEN_KW_UNTIL);
 
 keywords.set("break", TOKEN_KW_BREAK);
+
+keywords.set("or", TOKEN_OP_OR);
+keywords.set("false", TOKEN_KW_FALSE);
+keywords.set("nil", TOKEN_KW_NIL);
+keywords.set("true", TOKEN_KW_TRUE);
 
 function newLexer(chunk, chunkName)
 {
@@ -2785,7 +2830,8 @@ function parseTableConstructorExp(lexer)
 
 function primary(lexer) 
 {
-    //只支持标识符和数字,表,函数
+    let token;
+
     switch (lexer.lookAhead()) 
     {
         case TOKEN_NUMBER:
@@ -2797,13 +2843,28 @@ function primary(lexer)
             break;
 
         case TOKEN_STRING:
-            let token_ = lexer.nextToken();
-            return stringExp(token_.line, token_.token);
+            token = lexer.nextToken();
+            return stringExp(token.line, token.token);
             break
 
         case TOKEN_KW_FUNCTION:
             lexer.nextToken();
             return parseFuncDefExp(lexer);
+            break;
+
+        case TOKEN_KW_FALSE:
+            token = lexer.nextToken();
+            return falseExp(token.line);
+            break;
+
+        case TOKEN_KW_TRUE:
+            token = lexer.nextToken();
+            return trueExp(token.line);
+            break;
+
+        case TOKEN_KW_NIL:
+            token = lexer.nextToken();
+            return nilExp(token.line);
             break;
 
         default:
@@ -2865,11 +2926,35 @@ function term(lexer)
     return expr;
 }
 
+function parseExp12(lexer)
+{
+    let expr = term(lexer);
+
+    while (1) 
+    {
+        switch (lexer.lookAhead()) 
+        {
+            case TOKEN_OP_OR:
+                let i = lexer.nextToken();
+                let line = i.line;
+                let op = i.kind;
+
+                expr = binOpExp(line, op, expr, term(lexer));
+                break;
+        
+            default:
+                return expr;
+        }
+    }
+
+    return expr;
+}
+
 //解析表达式
 //暂时只支持加法,等于判断，表
 function parseExp(lexer)
 {
-    return term(lexer);
+    return parseExp12(lexer);
 }
 
 //解析if语句
@@ -3737,39 +3822,38 @@ function newFuncInfo(parent, fd)
         i.emitABC(OP_LOADBOOL, a, b, c);
     }
     
+    i.emitBinaryOp = function(op, a, b, c)
+    {
+        if (op == TOKEN_OP_ADD)
+        {
+            i.emitABC(OP_ADD, a, b, c);
+            return;
+        }
+        else if (op == TOKEN_OP_EQ)
+        {
+            i.emitABC(OP_EQ, 1, b, c);
+        }
+        else if (op == TOKEN_OP_LE)
+        {
+            i.emitABC(OP_LE, 1, b, c);
+        }
+        else if (op == TOKEN_OP_LT)
+        {
+            i.emitABC(OP_LT, 1, b, c);
+        }
+        else if (op == TOKEN_OP_GE)
+        {
+            i.emitABC(OP_LE, 1, c, b);
+        }
+        else if (op == TOKEN_OP_GT)
+        {
+            i.emitABC(OP_LT, 1, c, b);
+        }
 
-i.emitBinaryOp = function(op, a, b, c)
-{
-    if (op == TOKEN_OP_ADD)
-    {
-        i.emitABC(OP_ADD, a, b, c);
-        return;
+        i.emitJmp(0, 1);
+        i.emitLoadBool(a, 0, 1);
+        i.emitLoadBool(a, 1, 0);
     }
-    else if (op == TOKEN_OP_EQ)
-    {
-        i.emitABC(OP_EQ, 1, b, c);
-    }
-    else if (op == TOKEN_OP_LE)
-    {
-        i.emitABC(OP_LE, 1, b, c);
-    }
-    else if (op == TOKEN_OP_LT)
-    {
-        i.emitABC(OP_LT, 1, b, c);
-    }
-    else if (op == TOKEN_OP_GE)
-    {
-        i.emitABC(OP_LE, 1, c, b);
-    }
-    else if (op == TOKEN_OP_GT)
-    {
-        i.emitABC(OP_LT, 1, c, b);
-    }
-
-    i.emitJmp(0, 1);
-    i.emitLoadBool(a, 0, 1);
-    i.emitLoadBool(a, 1, 0);
-}
 
     i.emitLoadK = function(a, k)
     {
@@ -3870,6 +3954,11 @@ i.emitBinaryOp = function(op, a, b, c)
     i.emitSelf = function(a, b, c)
     {
         i.emitABC(OP_SELF, a, b, c);
+    }
+
+    i.emitTestSet = function(a, b, c)
+    {
+        i.emitABC(OP_TESTSET, a, b, c)
     }
 
     ////////////////////////////////
@@ -4171,13 +4260,33 @@ function cgRetStat(fi, retExps)
 
 function cgBinopExp(fi, node, a)
 {
+    let b;
+    let c;
+
     switch (node.op) 
     {
+        case TOKEN_OP_OR:
+            b = fi.allocReg();
+            cgExp(fi, node.exp1, b, 1);
+            fi.freeReg();
+
+            fi.emitTestSet(a, b, 1);
+
+            let pcOfJmp = fi.emitJmp(0, 0);
+
+            b = fi.allocReg();
+            cgExp(fi, node.exp2, b, 1);
+            fi.freeReg();
+
+            fi.emitMove(a, b);
+            fi.fixSbx(pcOfJmp, fi.pc()-pcOfJmp);
+            break;
+
         default:
-            let b = fi.allocReg();
+            b = fi.allocReg();
             cgExp(fi, node.exp1, b, 1);
 
-            let c = fi.allocReg();
+            c = fi.allocReg();
             cgExp(fi, node.exp2, c, 1);
 
             fi.emitBinaryOp(node.op, a, b, c);
@@ -4208,6 +4317,41 @@ function stringExp(line, str)
     i.str = str;
 
     i.type = "StringExp";
+
+    return i;
+}
+
+function falseExp(line)
+{
+    let i = {};
+
+    i.line = line;
+
+    i.type = "FalseExp";
+
+    return i;
+}
+
+
+function trueExp(line)
+{
+    let i = {};
+
+    i.line = line;
+
+    i.type = "TrueExp";
+
+    return i;
+}
+
+
+function nilExp(line)
+{
+    let i = {};
+
+    i.line = line;
+
+    i.type = "NilExp";
 
     return i;
 }
@@ -4457,6 +4601,18 @@ function cgExp(fi, exp, a, n)
 
         case "TableConstructorExp":
             cgTableConstructorExp(fi, exp, a);
+            break;
+
+        case "NilExp":
+            fi.emitLoadNil(a, n);
+            break;
+
+        case "FalseExp":
+            fi.emitLoadBool(a, 0, 0);
+            break;
+
+        case "TrueExp":
+            fi.emitLoadBool(a, 1, 0)
             break;
 
         default:
