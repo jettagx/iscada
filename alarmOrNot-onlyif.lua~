@@ -1,19 +1,28 @@
-Base = {num = 0}
+function newAccount (initBalance)
+    local self = {balance = initBalance}
 
-function Base:new(o)
-    o = o or {}
-    self.__index = self
-    setmetatable(o, self)
-    return o
+    local add = function (v)
+                   self.balance = self.balance + v
+                end
+
+    local extra = function ()
+                     if self.balance > 50
+                     then
+                         return 0.1
+                     else
+                         return 0
+                     end
+                  end
+
+    local getBalance = function()return self.balance + extra() end
+
+    return {
+              add = add,
+              getBalance = getBalance 
+           }
 end
 
-function Base:print()
-    print("Base:")
-    print(self.num)
-end
-
-SpecialBase = Base:new()
-
-s = SpecialBase:new({num = 10})
-
-s:print()
+acc1 = newAccount(100)
+print(acc1.getBalance())
+acc1.add(100) 
+print(acc1.getBalance())

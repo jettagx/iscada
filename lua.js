@@ -3344,15 +3344,36 @@ function _finishLocalVarDeclStat(lexer)
     return newLocalValDeclStat(lastLine, nameList, expList);
 }
 
-//local a = 2;
+function localFuncDefStat(name, exp)
+{
+    let i = {};
+
+    i.type = "LocalFuncDefStat";
+
+    i.name = name;
+    i.exp = exp;
+
+    return i;
+}
+
+function _finishLocalFuncDefStat(lexer)
+{
+    lexer.nextTokenOfKind(TOKEN_KW_FUNCTION);//确保是function开头
+
+    let indent = lexer.nextIdentifier();
+    
+    let fdExp = parseFuncDefExp(lexer);
+    
+    return localFuncDefStat(indent.tokan, fdExp);
+}
+
 function parseLocalAssignOrFuncDefStat(lexer)
 {
     lexer.nextTokenOfKind(TOKEN_KW_LOCAL);
 
     if (lexer.lookAhead() == TOKEN_KW_FUNCTION)
     {
-        //暂时不支持local类型的函数定义
-        throw "parseLocalAssignOrFuncDefStat function error";
+        return _finishLocalFuncDefStat(lexer);
     }
     else
     {
@@ -5005,6 +5026,13 @@ function cgBreakStat(fi, node)
 	fi.addBreakJmp(pc);
 }
 
+function cgLocalFuncDefStat(fi, node)
+{
+    let r = fi.addLocVar(node.name);
+
+    cgFuncDefExp(fi, node.exp, r);
+}
+
 function cgStat(fi, stat)
 {
     switch (stat.type) {
@@ -5042,6 +5070,10 @@ function cgStat(fi, stat)
 
         case "BreakStat":
             cgBreakStat(fi, stat);
+            break;
+
+        case "LocalFuncDefStat":
+            cgLocalFuncDefStat(fi, stat);
             break;
 
         default:
