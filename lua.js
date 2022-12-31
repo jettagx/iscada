@@ -4406,12 +4406,13 @@ function prepFuncCall(fi, node, a)
         cgExp(fi, arg, tmp, 1);//加载函数参数，1代表1个返回值
     }
 
-    fi.freeRegs(nArgs);
 
     if (node.nameExp != null)
     {
         nArgs++;
     }
+
+    fi.freeRegs(nArgs);
 
     return nArgs;
 }
